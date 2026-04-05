@@ -22,7 +22,7 @@ A local web-based project multiplexer with integrated Claude AI agents. Manage m
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/overlord.git
+git clone https://github.com/poptocrack/overlord.git
 cd overlord
 
 # Install dependencies

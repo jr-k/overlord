@@ -5,7 +5,7 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Development Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/overlord.git
+git clone https://github.com/poptocrack/overlord.git
 cd overlord
 npm install
 npm run dev
