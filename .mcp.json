@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "command": "npx",
+      "args": ["shadcn@latest", "mcp"]
+    },
+    "overlord": {
+      "command": "npx",
+      "args": ["tsx", "server/mcp.ts"],
+      "env": {
+        "OVERLORD_PORT": "4747"
+      }
+    }
+  }
+}

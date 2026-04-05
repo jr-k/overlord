@@ -1,115 +1,219 @@
+import { useState, useMemo, useCallback } from "react";
+import { cn } from "@/lib/utils";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInput,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { patch } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
+import type { AgentStatusMap } from "../App.js";
+import { Star, EyeOff, Eye } from "lucide-react";
 
-const STATUS_COLORS = {
-  active: "#4ade80",
-  paused: "#fbbf24",
-  blocked: "#f87171",
+const AGENT_STATUS_STYLES: Record<string, string> = {
+  none:    "bg-zinc-500/50",
+  idle:    "bg-blue-400 shadow-[0_0_4px_rgba(96,165,250,0.4)]",
+  running: "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.4)] animate-pulse",
+  done:    "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.4)]",
+  error:   "bg-red-400 shadow-[0_0_4px_rgba(248,113,113,0.4)]",
 };
 
 interface Props {
   projects: Project[];
   selected: Project | null;
+  agentStatuses: AgentStatusMap;
   onSelect: (p: Project) => void;
   onScan: () => void;
+  onProjectUpdate: () => void;
 }
 
-export function Sidebar({ projects, selected, onSelect, onScan }: Props) {
+export function ProjectSidebar({
+  projects,
+  selected,
+  agentStatuses,
+  onSelect,
+  onScan,
+  onProjectUpdate,
+}: Props) {
+  const [search, setSearch] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+
+  const filtered = useMemo(() => {
+    let list = projects;
+    if (!showHidden) list = list.filter((p) => !p.hidden);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [projects, search, showHidden]);
+
+  const favorites = useMemo(() => filtered.filter((p) => p.favorite), [filtered]);
+  const others = useMemo(() => filtered.filter((p) => !p.favorite), [filtered]);
+
+  const toggleFavorite = useCallback(
+    async (e: React.MouseEvent, project: Project) => {
+      e.stopPropagation();
+      await patch(`/projects/${project.id}`, { favorite: !project.favorite });
+      onProjectUpdate();
+    },
+    [onProjectUpdate]
+  );
+
+  const toggleHidden = useCallback(
+    async (e: React.MouseEvent, project: Project) => {
+      e.stopPropagation();
+      await patch(`/projects/${project.id}`, { hidden: !project.hidden });
+      onProjectUpdate();
+    },
+    [onProjectUpdate]
+  );
+
+  const renderProject = (p: Project) => (
+    <SidebarMenuItem key={p.id} className="group/project">
+      <SidebarMenuButton
+        isActive={selected?.id === p.id}
+        onClick={() => onSelect(p)}
+        tooltip={p.path}
+        className={cn(p.hidden && "opacity-40")}
+      >
+        <span
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            AGENT_STATUS_STYLES[agentStatuses[p.id] ?? "none"]
+          )}
+        />
+        <span className="truncate">{p.name}</span>
+        {p.favorite && (
+          <Star className="ml-auto h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400 group-hover/project:hidden" />
+        )}
+      </SidebarMenuButton>
+
+      {/* Action buttons — visible on hover */}
+      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover/project:opacity-100 transition-opacity">
+        <Tooltip>
+          <TooltipTrigger>
+            <button
+              onClick={(e) => toggleHidden(e, p)}
+              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent"
+            >
+              {p.hidden ? (
+                <Eye className="h-3 w-3 text-sidebar-foreground/50" />
+              ) : (
+                <EyeOff className="h-3 w-3 text-sidebar-foreground/50" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="text-xs">
+            {p.hidden ? "Afficher" : "Cacher"}
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger>
+            <button
+              onClick={(e) => toggleFavorite(e, p)}
+              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent"
+            >
+              <Star
+                className={cn(
+                  "h-3 w-3",
+                  p.favorite
+                    ? "fill-yellow-400 text-yellow-400"
+                    : "text-sidebar-foreground/50"
+                )}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="text-xs">
+            {p.favorite ? "Retirer des favoris" : "Favori"}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </SidebarMenuItem>
+  );
+
   return (
-    <aside style={styles.sidebar}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>OVERLORD</h1>
-      </div>
+    <Sidebar>
+      <SidebarHeader>
+        <div className="flex items-center justify-between">
+          <h1 className="text-[11px] font-bold tracking-[3px] text-primary">
+            OVERLORD
+          </h1>
+          <span className="text-[10px] text-muted-foreground">
+            {projects.filter((p) => !p.hidden).length}
+          </span>
+        </div>
+        <SidebarInput
+          placeholder="Rechercher..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </SidebarHeader>
 
-      <div style={styles.list}>
-        {projects.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => onSelect(p)}
-            style={{
-              ...styles.item,
-              background: selected?.id === p.id ? "#1e1e2e" : "transparent",
-              borderLeft:
-                selected?.id === p.id
-                  ? "3px solid #818cf8"
-                  : "3px solid transparent",
-            }}
-          >
-            <span
-              style={{
-                ...styles.dot,
-                background: STATUS_COLORS[p.status],
-              }}
-            />
-            <span style={styles.name}>{p.name}</span>
-          </button>
-        ))}
-      </div>
+      <SidebarContent>
+        {favorites.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Favoris</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{favorites.map(renderProject)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
-      <button onClick={onScan} style={styles.scanBtn}>
-        Scan projects
-      </button>
-    </aside>
+        <SidebarGroup>
+          <SidebarGroupLabel>Projets</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {others.map(renderProject)}
+              {filtered.length === 0 && (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  Aucun projet trouve
+                </p>
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      <SidebarFooter className="gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs text-muted-foreground"
+          onClick={() => setShowHidden((v) => !v)}
+        >
+          {showHidden ? (
+            <Eye className="mr-2 h-3 w-3" />
+          ) : (
+            <EyeOff className="mr-2 h-3 w-3" />
+          )}
+          {showHidden ? "Masquer les caches" : "Afficher les caches"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full text-xs"
+          onClick={onScan}
+        >
+          Scanner les projets
+        </Button>
+      </SidebarFooter>
+    </Sidebar>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  sidebar: {
-    width: 240,
-    minWidth: 240,
-    background: "#12121a",
-    borderRight: "1px solid #2a2a3a",
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-  },
-  header: {
-    padding: "20px 16px 12px",
-    borderBottom: "1px solid #2a2a3a",
-  },
-  title: {
-    fontSize: 13,
-    fontWeight: 700,
-    letterSpacing: 3,
-    color: "#818cf8",
-  },
-  list: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "8px 0",
-  },
-  item: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    width: "100%",
-    padding: "10px 16px",
-    border: "none",
-    color: "#e0e0e0",
-    cursor: "pointer",
-    fontSize: 14,
-    textAlign: "left" as const,
-    transition: "background 0.15s",
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    flexShrink: 0,
-  },
-  name: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap" as const,
-  },
-  scanBtn: {
-    margin: 12,
-    padding: "10px 16px",
-    background: "#1e1e2e",
-    border: "1px solid #2a2a3a",
-    borderRadius: 8,
-    color: "#818cf8",
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-  },
-};

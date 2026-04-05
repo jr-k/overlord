@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -7,6 +7,10 @@ export const projects = sqliteTable("projects", {
   status: text("status", { enum: ["active", "paused", "blocked"] })
     .notNull()
     .default("active"),
+  favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
+  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+  summary: text("summary"),
+  lastSummaryAt: text("last_summary_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -38,6 +42,7 @@ export const conversations = sqliteTable("conversations", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   lastResumedAt: text("last_resumed_at"),
+  eventsJson: text("events_json"),
 });
 
 export const messages = sqliteTable("messages", {
@@ -48,6 +53,20 @@ export const messages = sqliteTable("messages", {
   role: text("role", { enum: ["user", "assistant"] }).notNull(),
   content: text("content").notNull(),
   thinking: text("thinking"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const todos = sqliteTable("todos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  title: text("title").notNull(),
+  description: text("description"),
+  done: integer("done", { mode: "boolean" }).notNull().default(false),
+  sortOrder: real("sort_order").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

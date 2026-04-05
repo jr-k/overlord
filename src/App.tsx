@@ -1,19 +1,89 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Project } from "./types.js";
 import { useApi, post } from "./hooks/useApi.js";
-import { Sidebar } from "./components/Sidebar.js";
+import { ProjectSidebar } from "./components/Sidebar.js";
 import { SummaryTab } from "./components/SummaryTab.js";
 import { ChatTab } from "./components/ChatTab.js";
 import { TimelineTab } from "./components/TimelineTab.js";
+import { TodosTab } from "./components/TodosTab.js";
+import { TerminalTab } from "./components/TerminalTab.js";
+import { WorkspacesTab } from "./components/WorkspacesTab.js";
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { ExternalLink } from "lucide-react";
 
-type Tab = "summary" | "chat" | "timeline";
+export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
 export function App() {
   const { data: projects, refetch } = useApi<Project[]>("/projects");
   const [selected, setSelected] = useState<Project | null>(null);
-  const [tab, setTab] = useState<Tab>("summary");
-  // Persist chat input per project (survives tab switches)
+  const [tab, setTab] = useState(() => localStorage.getItem("overlord:tab") ?? "chat");
   const [chatInputs, setChatInputs] = useState<Record<number, string>>({});
+  const [restored, setRestored] = useState(false);
+  const [agentStatuses, setAgentStatuses] = useState<AgentStatusMap>({});
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
+  const statusWsRef = useRef<WebSocket | null>(null);
+
+  // Restore selected project from localStorage when projects load
+  useEffect(() => {
+    if (restored || !projects?.length) return;
+    const savedId = localStorage.getItem("overlord:projectId");
+    if (savedId) {
+      const found = projects.find((p) => p.id === Number(savedId));
+      if (found) setSelected(found);
+    }
+    setRestored(true);
+  }, [projects, restored]);
+
+  // Persist selected project + fetch remote URL
+  useEffect(() => {
+    if (selected) {
+      localStorage.setItem("overlord:projectId", String(selected.id));
+      fetch(`/api/projects/${selected.id}`)
+        .then((r) => r.json())
+        .then((data) => setRemoteUrl(data.remoteUrl ?? null))
+        .catch(() => setRemoteUrl(null));
+    } else {
+      setRemoteUrl(null);
+    }
+  }, [selected]);
+
+  // Persist tab
+  useEffect(() => {
+    localStorage.setItem("overlord:tab", tab);
+  }, [tab]);
+
+  // Fetch initial agent statuses + listen for changes via WS
+  useEffect(() => {
+    fetch("/api/agent/statuses")
+      .then((r) => r.json())
+      .then((data: Record<string, string>) => {
+        const mapped: AgentStatusMap = {};
+        for (const [k, v] of Object.entries(data)) {
+          mapped[Number(k)] = v as AgentStatusMap[number];
+        }
+        setAgentStatuses(mapped);
+      })
+      .catch(() => {});
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    statusWsRef.current = ws;
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "agent:status_change") {
+        setAgentStatuses((prev) => ({
+          ...prev,
+          [msg.projectId]: msg.status,
+        }));
+      }
+    };
+
+    return () => ws.close();
+  }, []);
 
   const handleScan = useCallback(async () => {
     await post("/projects/scan");
@@ -25,128 +95,118 @@ export function App() {
     setTab("chat");
   }, []);
 
-  return (
-    <div style={styles.root}>
-      <Sidebar
-        projects={projects ?? []}
-        selected={selected}
-        onSelect={handleSelect}
-        onScan={handleScan}
-      />
+  // "Lancer" from Todos: put text in chat input and switch to chat tab
+  const handleSendToChat = useCallback(
+    (message: string) => {
+      if (!selected) return;
+      setChatInputs((prev) => ({ ...prev, [selected.id]: message }));
+      setTab("chat");
+    },
+    [selected]
+  );
 
-      <main style={styles.main}>
-        {selected ? (
-          <>
-            <div style={styles.tabBar}>
-              <h2 style={styles.projectName}>{selected.name}</h2>
-              <div style={styles.tabs}>
-                {(["summary", "chat", "timeline"] as Tab[]).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setTab(t)}
-                    style={{
-                      ...styles.tab,
-                      borderBottom:
-                        tab === t
-                          ? "2px solid #818cf8"
-                          : "2px solid transparent",
-                      color: tab === t ? "#e0e0e0" : "#666",
-                    }}
-                  >
-                    {t === "summary"
-                      ? "Resume"
-                      : t === "chat"
-                        ? "Chat"
-                        : "Timeline"}
-                  </button>
-                ))}
+  return (
+    <TooltipProvider>
+      <SidebarProvider>
+        <ProjectSidebar
+          projects={projects ?? []}
+          selected={selected}
+          agentStatuses={agentStatuses}
+          onSelect={handleSelect}
+          onScan={handleScan}
+          onProjectUpdate={refetch}
+        />
+        <SidebarInset className="flex flex-col overflow-hidden min-h-0 h-screen">
+          {selected ? (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+                <SidebarTrigger className="-ml-1" />
+                <Separator orientation="vertical" className="mr-2 !h-4" />
+                <h2 className="flex-1 flex items-center gap-2 text-sm font-semibold">
+                  {selected.name}
+                  {remoteUrl && (
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <a
+                          href={remoteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">{remoteUrl}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </h2>
+                <Tabs value={tab} onValueChange={setTab}>
+                  <TabsList>
+                    <TabsTrigger value="chat">Chat</TabsTrigger>
+                    <TabsTrigger value="todos">Todos</TabsTrigger>
+                    <TabsTrigger value="workspaces">Workspaces</TabsTrigger>
+                    <TabsTrigger value="summary">Resume</TabsTrigger>
+                    <TabsTrigger value="terminal">Terminal</TabsTrigger>
+                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </header>
+
+              <div className="flex-1 overflow-hidden min-h-0">
+                {tab === "summary" && (
+                  <div className="h-full overflow-auto">
+                    <SummaryTab project={selected} />
+                  </div>
+                )}
+                {tab === "timeline" && (
+                  <div className="h-full overflow-auto">
+                    <TimelineTab project={selected} />
+                  </div>
+                )}
+                {tab === "todos" && (
+                  <div className="h-full overflow-auto">
+                    <TodosTab
+                      project={selected}
+                      onSendToChat={handleSendToChat}
+                    />
+                  </div>
+                )}
+                {tab === "workspaces" && (
+                  <div className="h-full overflow-auto">
+                    <WorkspacesTab project={selected} />
+                  </div>
+                )}
+                {tab === "terminal" && (
+                  <div className="h-full">
+                    <TerminalTab project={selected} />
+                  </div>
+                )}
+                {tab === "chat" && (
+                  <ChatTab
+                    key={selected.id}
+                    project={selected}
+                    input={chatInputs[selected.id] ?? ""}
+                    onInputChange={(v) =>
+                      setChatInputs((prev) => ({ ...prev, [selected.id]: v }))
+                    }
+                  />
+                )}
               </div>
             </div>
-            <div style={styles.content}>
-              {tab === "summary" && <SummaryTab project={selected} />}
-              {tab === "timeline" && <TimelineTab project={selected} />}
-              {tab === "chat" && (
-                <ChatTab
-                  project={selected}
-                  input={chatInputs[selected.id] ?? ""}
-                  onInputChange={(v) =>
-                    setChatInputs((prev) => ({ ...prev, [selected.id]: v }))
-                  }
-                />
-              )}
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <SidebarTrigger className="absolute left-4 top-4" />
+              <h2 className="text-3xl font-bold tracking-wider text-primary">
+                Overlord
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Selectionne un projet ou scanne le repertoire.
+              </p>
             </div>
-          </>
-        ) : (
-          <div style={styles.empty}>
-            <h2 style={styles.emptyTitle}>Overlord</h2>
-            <p style={styles.emptyText}>
-              Selectionne un projet ou scanne le repertoire.
-            </p>
-          </div>
-        )}
-      </main>
-    </div>
+          )}
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    height: "100vh",
-    overflow: "hidden",
-  },
-  main: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  },
-  tabBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0 24px",
-    borderBottom: "1px solid #2a2a3a",
-    background: "#0e0e16",
-  },
-  projectName: {
-    fontSize: 18,
-    fontWeight: 600,
-    color: "#e0e0e0",
-  },
-  tabs: {
-    display: "flex",
-    gap: 4,
-  },
-  tab: {
-    padding: "16px 20px",
-    background: "none",
-    border: "none",
-    fontSize: 14,
-    fontWeight: 500,
-    cursor: "pointer",
-    transition: "color 0.15s",
-  },
-  content: {
-    flex: 1,
-    overflow: "auto",
-  },
-  empty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 32,
-    fontWeight: 700,
-    color: "#818cf8",
-    letterSpacing: 2,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#555",
-  },
-};

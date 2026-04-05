@@ -10,22 +10,29 @@ export function TimelineTab({ project }: Props) {
     `/sessions/${project.id}`
   );
 
-  if (loading) return <div style={styles.loading}>Chargement...</div>;
+  if (loading) {
+    return <div className="p-6 text-muted-foreground">Chargement...</div>;
+  }
 
   return (
-    <div style={styles.container}>
+    <div className="max-w-2xl p-6">
       {!sessions || sessions.length === 0 ? (
-        <p style={styles.empty}>
+        <p className="text-sm italic text-muted-foreground">
           Aucune session enregistree pour ce projet.
         </p>
       ) : (
-        <div style={styles.timeline}>
-          {sessions.map((s) => (
-            <div key={s.id} style={styles.entry}>
-              <div style={styles.dot} />
-              <div style={styles.line} />
-              <div style={styles.content}>
-                <div style={styles.date}>
+        <div className="flex flex-col">
+          {sessions.map((s, i) => (
+            <div key={s.id} className="relative pb-6 pl-7">
+              {/* Dot */}
+              <div className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
+              {/* Line */}
+              {i < sessions.length - 1 && (
+                <div className="absolute bottom-0 left-1 top-5 w-0.5 bg-border" />
+              )}
+              {/* Content */}
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="mb-1 text-xs text-muted-foreground">
                   {new Date(s.startedAt).toLocaleDateString("fr-FR", {
                     weekday: "long",
                     day: "numeric",
@@ -34,13 +41,12 @@ export function TimelineTab({ project }: Props) {
                     minute: "2-digit",
                   })}
                   {s.endedAt && (
-                    <span style={styles.duration}>
-                      {" "}
-                      — {getDuration(s.startedAt, s.endedAt)}
+                    <span className="text-muted-foreground/60">
+                      {" "}— {getDuration(s.startedAt, s.endedAt)}
                     </span>
                   )}
                 </div>
-                <div style={styles.summary}>
+                <div className="text-sm leading-relaxed text-foreground/80">
                   {s.summary ?? "Pas de resume"}
                 </div>
               </div>
@@ -58,64 +64,3 @@ function getDuration(start: string, end: string): string {
   if (mins < 60) return `${mins}min`;
   return `${Math.floor(mins / 60)}h${mins % 60}min`;
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: 24,
-    maxWidth: 700,
-  },
-  loading: {
-    padding: 24,
-    color: "#666",
-  },
-  empty: {
-    color: "#555",
-    fontStyle: "italic",
-    fontSize: 14,
-  },
-  timeline: {
-    display: "flex",
-    flexDirection: "column",
-  },
-  entry: {
-    position: "relative",
-    paddingLeft: 28,
-    paddingBottom: 24,
-  },
-  dot: {
-    position: "absolute",
-    left: 0,
-    top: 6,
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
-    background: "#818cf8",
-  },
-  line: {
-    position: "absolute",
-    left: 4,
-    top: 20,
-    bottom: 0,
-    width: 2,
-    background: "#2a2a3a",
-  },
-  content: {
-    background: "#12121a",
-    border: "1px solid #2a2a3a",
-    borderRadius: 10,
-    padding: 16,
-  },
-  date: {
-    fontSize: 12,
-    color: "#888",
-    marginBottom: 6,
-  },
-  duration: {
-    color: "#666",
-  },
-  summary: {
-    fontSize: 14,
-    color: "#ccc",
-    lineHeight: 1.6,
-  },
-};

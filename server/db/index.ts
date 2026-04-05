@@ -55,9 +55,40 @@ export function initDb() {
     );
   `);
 
-  // Migration: add thinking column if missing
-  const cols = sqlite.pragma("table_info(messages)") as { name: string }[];
-  if (!cols.some((c) => c.name === "thinking")) {
+  // Migrations
+  const msgCols = sqlite.pragma("table_info(messages)") as { name: string }[];
+  if (!msgCols.some((c) => c.name === "thinking")) {
     sqlite.exec("ALTER TABLE messages ADD COLUMN thinking TEXT");
   }
+
+  const convCols = sqlite.pragma("table_info(conversations)") as { name: string }[];
+  if (!convCols.some((c) => c.name === "events_json")) {
+    sqlite.exec("ALTER TABLE conversations ADD COLUMN events_json TEXT");
+  }
+
+  const projCols = sqlite.pragma("table_info(projects)") as { name: string }[];
+  if (!projCols.some((c) => c.name === "favorite")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!projCols.some((c) => c.name === "hidden")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!projCols.some((c) => c.name === "summary")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN summary TEXT");
+  }
+  if (!projCols.some((c) => c.name === "last_summary_at")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN last_summary_at TEXT");
+  }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS todos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      done INTEGER NOT NULL DEFAULT 0,
+      sort_order REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }

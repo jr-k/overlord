@@ -1,150 +1,133 @@
-import type { Project, Session } from "../types.js";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import type { Project } from "../types.js";
 import { useApi } from "../hooks/useApi.js";
+
+interface ProjectWithSummary extends Project {
+  summary: string | null;
+  lastSummaryAt: string | null;
+}
+
+interface Conversation {
+  id: number;
+  title: string | null;
+  createdAt: string;
+}
 
 interface Props {
   project: Project;
 }
 
 export function SummaryTab({ project }: Props) {
-  const { data: sessions } = useApi<Session[]>(
-    `/sessions/${project.id}`
+  const { data: fullProject } = useApi<ProjectWithSummary>(
+    `/projects/${project.id}`
+  );
+  const { data: conversations } = useApi<Conversation[]>(
+    `/conversations/${project.id}`
   );
 
-  const latest = sessions?.[0];
+  const summary = fullProject?.summary;
+  const lastSummaryAt = fullProject?.lastSummaryAt;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Status</h3>
-        <div style={styles.statusRow}>
-          <StatusBadge status={project.status} />
-          <span style={styles.path}>{project.path}</span>
-        </div>
-      </div>
+    <div className="flex max-w-3xl flex-col gap-4 p-6">
+      {/* Project summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Resume du projet</CardTitle>
+          {lastSummaryAt && (
+            <CardDescription className="text-xs">
+              Mis a jour le{" "}
+              {new Date(lastSummaryAt).toLocaleDateString("fr-FR", {
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent>
+          {summary ? (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+              {summary}
+            </p>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">
+              Aucun resume disponible. Le resume sera genere automatiquement apres ta prochaine conversation avec Claude.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Dernier resume</h3>
-        {latest?.summary ? (
-          <p style={styles.summary}>{latest.summary}</p>
-        ) : (
-          <p style={styles.empty}>
-            Aucun resume de session. Lance un chat pour commencer.
-          </p>
-        )}
-      </div>
-
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Sessions recentes</h3>
-        {sessions && sessions.length > 0 ? (
-          <div style={styles.sessionList}>
-            {sessions.slice(0, 5).map((s) => (
-              <div key={s.id} style={styles.sessionItem}>
-                <span style={styles.sessionDate}>
-                  {new Date(s.startedAt).toLocaleDateString("fr-FR", {
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <span style={styles.sessionSummary}>
-                  {s.summary ?? "Pas de resume"}
-                </span>
-              </div>
-            ))}
+      {/* Project info */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Infos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Chemin</span>
+              <span className="font-mono text-xs text-foreground/70">{project.path}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Conversations</span>
+              <span>{conversations?.length ?? 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Cree le</span>
+              <span className="text-foreground/70">
+                {new Date(project.createdAt).toLocaleDateString("fr-FR", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </span>
+            </div>
           </div>
-        ) : (
-          <p style={styles.empty}>Aucune session.</p>
-        )}
-      </div>
+        </CardContent>
+      </Card>
+
+      {/* Recent conversations */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Conversations recentes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {conversations && conversations.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {conversations.slice(0, 10).map((c) => (
+                <div
+                  key={c.id}
+                  className="flex gap-3 border-b border-border py-2 last:border-0"
+                >
+                  <span className="min-w-[120px] shrink-0 text-xs text-muted-foreground">
+                    {new Date(c.createdAt).toLocaleDateString("fr-FR", {
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  <span className="truncate text-sm text-foreground/70">
+                    {c.title ?? "Session sans titre"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">
+              Aucune conversation.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: "#4ade80",
-    paused: "#fbbf24",
-    blocked: "#f87171",
-  };
-  return (
-    <span
-      style={{
-        padding: "4px 12px",
-        borderRadius: 12,
-        fontSize: 12,
-        fontWeight: 600,
-        background: `${colors[status]}20`,
-        color: colors[status],
-        textTransform: "uppercase" as const,
-      }}
-    >
-      {status}
-    </span>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: 24,
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    maxWidth: 800,
-  },
-  card: {
-    background: "#12121a",
-    border: "1px solid #2a2a3a",
-    borderRadius: 12,
-    padding: 20,
-  },
-  cardTitle: {
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 2,
-    textTransform: "uppercase" as const,
-    color: "#666",
-    marginBottom: 12,
-  },
-  statusRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  path: {
-    fontSize: 13,
-    color: "#888",
-    fontFamily: "monospace",
-  },
-  summary: {
-    fontSize: 14,
-    lineHeight: 1.6,
-    color: "#ccc",
-  },
-  empty: {
-    fontSize: 14,
-    color: "#555",
-    fontStyle: "italic",
-  },
-  sessionList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  },
-  sessionItem: {
-    display: "flex",
-    gap: 12,
-    padding: "8px 0",
-    borderBottom: "1px solid #1e1e2e",
-  },
-  sessionDate: {
-    fontSize: 12,
-    color: "#666",
-    whiteSpace: "nowrap" as const,
-    minWidth: 100,
-  },
-  sessionSummary: {
-    fontSize: 13,
-    color: "#aaa",
-  },
-};

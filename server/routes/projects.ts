@@ -2,18 +2,43 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects, sessions } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
+import { detectWorkspaces } from "../workspaces.js";
+
+function getGitRemoteUrl(projectPath: string): string | null {
+  try {
+    const url = execSync("git remote get-url origin", {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 3000,
+    }).trim();
+
+    // Convert SSH to HTTPS: git@github.com:user/repo.git -> https://github.com/user/repo
+    if (url.startsWith("git@")) {
+      return url
+        .replace(/^git@([^:]+):/, "https://$1/")
+        .replace(/\.git$/, "");
+    }
+    // Clean HTTPS urls
+    return url.replace(/\.git$/, "");
+  } catch {
+    return null;
+  }
+}
 
 const app = new Hono();
 
-// GET /api/projects - list all projects
+// GET /api/projects - list all projects (non-hidden, favorites first)
 app.get("/", (c) => {
+  const showHidden = c.req.query("hidden") === "true";
   const allProjects = db
     .select()
     .from(projects)
-    .orderBy(desc(projects.updatedAt))
-    .all();
+    .orderBy(desc(projects.favorite), desc(projects.updatedAt))
+    .all()
+    .filter((p) => showHidden || !p.hidden);
   return c.json(allProjects);
 });
 
@@ -31,7 +56,18 @@ app.get("/:id", (c) => {
     .limit(1)
     .get();
 
-  return c.json({ ...project, latestSession: latestSession ?? null });
+  const remoteUrl = getGitRemoteUrl(project.path);
+  return c.json({ ...project, latestSession: latestSession ?? null, remoteUrl });
+});
+
+// GET /api/projects/:id/workspaces - detect monorepo workspaces
+app.get("/:id/workspaces", (c) => {
+  const id = Number(c.req.param("id"));
+  const project = db.select().from(projects).where(eq(projects.id, id)).get();
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  const info = detectWorkspaces(project.path);
+  return c.json(info);
 });
 
 // PATCH /api/projects/:id - update project status
