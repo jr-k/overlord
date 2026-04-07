@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Square } from "lucide-react";
+import { Square, Copy, Check, ArrowDown } from "lucide-react";
+import { MarkdownContent } from "./MarkdownContent.js";
+import { ToolUseCard } from "./ToolUseCard.js";
 import type { Project } from "../types.js";
 
 type AgentStatus = "idle" | "waiting" | "running";
@@ -11,6 +13,9 @@ interface ChatEntry {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  toolName?: string;
+  toolInput?: Record<string, any>;
+  toolResult?: string;
 }
 
 interface Props {
@@ -19,6 +24,7 @@ interface Props {
   onInputChange: (value: string) => void;
 }
 
+// Extract readable chat entries from Claude stream-json events
 function extractFromEvents(events: any[]): ChatEntry[] {
   const entries: ChatEntry[] = [];
   let pendingText = "";
@@ -44,8 +50,19 @@ function extractFromEvents(events: any[]): ChatEntry[] {
           entries.push({
             id: block.id ?? crypto.randomUUID(),
             role: "tool",
-            content: `Tool: ${block.name}`,
+            content: block.name,
+            toolName: block.name,
+            toolInput: block.input,
           });
+        } else if (block.type === "tool_result") {
+          // Attach result to the last tool entry
+          const lastTool = [...entries].reverse().find((e) => e.role === "tool");
+          if (lastTool) {
+            const text = Array.isArray(block.content)
+              ? block.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
+              : typeof block.content === "string" ? block.content : "";
+            lastTool.toolResult = text;
+          }
         }
       }
     } else if (ev.type === "result") {
@@ -60,6 +77,40 @@ function extractFromEvents(events: any[]): ChatEntry[] {
   return entries;
 }
 
+function MessageBubble({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [content]);
+
+  return (
+    <div className="group/msg relative max-w-[90%] rounded-lg border border-border bg-card px-4 py-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider opacity-50">
+          Claude
+        </span>
+        <button
+          onClick={handleCopy}
+          className="flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/msg:opacity-100 hover:bg-secondary"
+          title="Copier le markdown"
+        >
+          {copied ? (
+            <Check className="h-3 w-3 text-green-400" />
+          ) : (
+            <Copy className="h-3 w-3 text-muted-foreground" />
+          )}
+        </button>
+      </div>
+      <div className="select-text">
+        <MarkdownContent content={content} />
+      </div>
+    </div>
+  );
+}
+
 export function ChatTab({ project, input, onInputChange }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,9 +122,15 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialScrollDone = useRef(false);
+  const userScrolledUp = useRef(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
-  // Slash commands — defaults until we get the real list from Claude's init event
-  // Built-in CLI commands that don't appear in Claude's slash_commands list
+  // Track current tool being used (for streaming tool input)
+  const currentToolRef = useRef<{ id: string; name: string; inputJson: string } | null>(null);
+  // Track event index to deduplicate events after subscribe
+  const lastEventIndexRef = useRef(0);
+
+  // Slash commands
   const BUILTIN_COMMANDS = [
     "clear", "help", "cost", "compact", "context",
     "init", "release-notes", "review", "security-review",
@@ -82,7 +139,6 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
 
-  // Derived: show slash menu when input starts with / and not dismissed
   const showSlash = input.startsWith("/") && agentStatus === "idle" && !slashDismissed;
   const slashQuery = input.startsWith("/") ? input.slice(1).toLowerCase() : "";
   const filteredCommands = useMemo(() => {
@@ -90,11 +146,8 @@ export function ChatTab({ project, input, onInputChange }: Props) {
     return slashCommands.filter((cmd) => cmd.toLowerCase().includes(slashQuery));
   }, [showSlash, slashCommands, slashQuery]);
 
-  // Reset dismiss when input changes away from /
   useEffect(() => {
-    if (!input.startsWith("/")) {
-      setSlashDismissed(false);
-    }
+    if (!input.startsWith("/")) setSlashDismissed(false);
     setSlashIndex(0);
   }, [input]);
 
@@ -111,17 +164,32 @@ export function ChatTab({ project, input, onInputChange }: Props) {
     };
   }, [agentStatus]);
 
-  // Auto-scroll
+  // Auto-scroll only if user hasn't scrolled up
   useEffect(() => {
-    if (scrollRef.current) {
-      if (!initialScrollDone.current && entries.length > 0) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        initialScrollDone.current = true;
-      } else {
-        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      }
+    if (!scrollRef.current) return;
+    if (!initialScrollDone.current && entries.length > 0) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      initialScrollDone.current = true;
+    } else if (!userScrolledUp.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }
   }, [entries, streamingText]);
+
+  // Detect user scroll position
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    const atBottom = scrollHeight - scrollTop - clientHeight < 80;
+    userScrolledUp.current = !atBottom;
+    setShowScrollBtn(!atBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    userScrolledUp.current = false;
+    setShowScrollBtn(false);
+  }, []);
 
   // WebSocket
   useEffect(() => {
@@ -152,7 +220,7 @@ export function ChatTab({ project, input, onInputChange }: Props) {
         const parsed = extractFromEvents(msg.events).slice(-50);
         setEntries(parsed);
         setStreamingText("");
-        // Extract slash commands from init events
+        lastEventIndexRef.current = msg.eventCount ?? msg.events.length;
         for (const ev of msg.events) {
           if (ev.type === "system" && ev.subtype === "init" && ev.slash_commands) {
             setSlashCommands((prev) => [...new Set([...BUILTIN_COMMANDS, ...ev.slash_commands])]);
@@ -168,19 +236,28 @@ export function ChatTab({ project, input, onInputChange }: Props) {
       } else if (msg.type === "agent:running") {
         setAgentStatus("running");
       } else if (msg.type === "agent:event") {
+        // Skip events already included in the history replay
+        if (msg.eventIndex && msg.eventIndex <= lastEventIndexRef.current) return;
+        lastEventIndexRef.current = msg.eventIndex ?? lastEventIndexRef.current;
+
         const ev = msg.event;
 
-        // Capture slash commands from init event
         if (ev.type === "system" && ev.subtype === "init" && ev.slash_commands) {
           setSlashCommands((prev) => [...new Set([...BUILTIN_COMMANDS, ...ev.slash_commands])]);
         }
 
         if (ev.type === "stream_event") {
           const inner = ev.event;
+
+          // Text streaming
           if (inner?.type === "content_block_delta" && inner.delta?.type === "text_delta") {
             setStreamingText((prev) => prev + inner.delta.text);
             setAgentStatus("running");
-          } else if (inner?.type === "content_block_start" && inner.content_block?.type === "tool_use") {
+          }
+
+          // Tool use start — flush text, begin tracking tool
+          if (inner?.type === "content_block_start" && inner.content_block?.type === "tool_use") {
+            // Flush pending text
             setStreamingText((prev) => {
               if (prev.trim()) {
                 setEntries((e) => [
@@ -190,16 +267,59 @@ export function ChatTab({ project, input, onInputChange }: Props) {
               }
               return "";
             });
-            setEntries((e) => [
-              ...e,
+            currentToolRef.current = {
+              id: inner.content_block.id,
+              name: inner.content_block.name,
+              inputJson: "",
+            };
+          }
+
+          // Tool input streaming (JSON deltas)
+          if (inner?.type === "content_block_delta" && inner.delta?.type === "input_json_delta" && currentToolRef.current) {
+            currentToolRef.current.inputJson += inner.delta.partial_json;
+          }
+
+          // Tool use end — parse input and add entry
+          if (inner?.type === "content_block_stop" && currentToolRef.current) {
+            const tool = currentToolRef.current;
+            currentToolRef.current = null;
+
+            let toolInput: Record<string, any> = {};
+            try {
+              toolInput = JSON.parse(tool.inputJson);
+            } catch {}
+
+            setEntries((prev) => [
+              ...prev,
               {
-                id: inner.content_block.id ?? crypto.randomUUID(),
+                id: tool.id,
                 role: "tool",
-                content: `Tool: ${inner.content_block.name}`,
+                content: tool.name,
+                toolName: tool.name,
+                toolInput,
               },
             ]);
+            setAgentStatus("running");
           }
         } else if (ev.type === "assistant") {
+          // Complete assistant message — might contain tool_result
+          const blocks = ev.message?.content ?? [];
+          for (const block of blocks) {
+            if (block.type === "tool_result") {
+              const text = Array.isArray(block.content)
+                ? block.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
+                : typeof block.content === "string" ? block.content : "";
+              // Attach to last tool entry with matching ID
+              setEntries((prev) => {
+                const updated = [...prev];
+                const idx = updated.map((e, i) => e.role === "tool" && e.id === block.tool_use_id ? i : -1).filter(i => i >= 0).pop() ?? -1;
+                if (idx >= 0) {
+                  updated[idx] = { ...updated[idx], toolResult: text };
+                }
+                return updated;
+              });
+            }
+          }
           setAgentStatus("running");
         } else if (ev.type === "result") {
           setStreamingText((prev) => {
@@ -270,7 +390,6 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Slash menu navigation
     if (showSlash && filteredCommands.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -374,7 +493,7 @@ export function ChatTab({ project, input, onInputChange }: Props) {
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 scrollbar-visible">
+      <div ref={scrollRef} onScroll={handleScroll} className="relative flex-1 min-h-0 overflow-y-auto p-4 space-y-3 scrollbar-visible select-text">
         {entries.length === 0 && !streamingText && agentStatus === "idle" && (
           <p className="text-center text-sm text-muted-foreground py-12">
             Demarrer une conversation avec Claude sur{" "}
@@ -386,43 +505,61 @@ export function ChatTab({ project, input, onInputChange }: Props) {
           </p>
         )}
 
-        {entries.map((entry) => (
-          <div
-            key={entry.id}
-            className={cn(
-              "max-w-[85%] rounded-lg px-4 py-3",
-              entry.role === "user"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : entry.role === "tool"
-                  ? "bg-secondary border border-border text-muted-foreground text-xs font-mono"
-                  : "bg-card border border-border"
-            )}
-          >
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">
-              {entry.role === "user" ? "Toi" : entry.role === "tool" ? "Outil" : "Claude"}
+        {entries.map((entry) =>
+          entry.role === "tool" ? (
+            <ToolUseCard
+              key={entry.id}
+              name={entry.toolName ?? entry.content}
+              input={entry.toolInput}
+              result={entry.toolResult}
+            />
+          ) : entry.role === "user" ? (
+            <div
+              key={entry.id}
+              className="ml-auto max-w-[80%] rounded-lg bg-primary px-4 py-3 text-primary-foreground"
+            >
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
+                Toi
+              </div>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed select-text">
+                {entry.content}
+              </div>
             </div>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed">
-              {entry.content}
-            </div>
-          </div>
-        ))}
+          ) : (
+            <MessageBubble key={entry.id} content={entry.content} />
+          )
+        )}
 
         {streamingText && (
-          <div className="max-w-[85%] rounded-lg border border-border bg-card px-4 py-3">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">
+          <div className="group/msg relative max-w-[90%] rounded-lg border border-border bg-card px-4 py-3">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
               Claude
             </div>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed">
-              {streamingText}
-              <span className="inline-block h-4 w-0.5 animate-pulse bg-primary ml-0.5" />
+            <div className="select-text">
+              <MarkdownContent content={streamingText} />
             </div>
+            <span className="inline-block h-4 w-0.5 animate-pulse bg-primary ml-0.5" />
           </div>
         )}
       </div>
 
+      {/* Scroll to bottom button */}
+      {showScrollBtn && (
+        <div className="flex justify-center -mt-10 relative z-10 pointer-events-none">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-7 gap-1.5 rounded-full px-3 text-xs shadow-lg pointer-events-auto border border-border"
+            onClick={scrollToBottom}
+          >
+            <ArrowDown className="h-3 w-3" />
+            Dernier message
+          </Button>
+        </div>
+      )}
+
       {/* Input area */}
       <div className="relative border-t border-border bg-card p-4">
-        {/* Slash command autocomplete */}
         {showSlash && filteredCommands.length > 0 && (
           <div className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg scrollbar-visible">
             {filteredCommands.map((cmd, i) => (

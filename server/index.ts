@@ -34,6 +34,68 @@ app.route("/api/sessions", sessionRoutes);
 app.route("/api/conversations", conversationRoutes);
 app.route("/api/todos", todoRoutes);
 
+// Open system terminal in a directory
+app.post("/api/terminal/open", async (c) => {
+  const body = await c.req.json();
+  const dir = body.path;
+  if (!dir) return c.json({ error: "Path required" }, 400);
+
+  const platform = process.platform;
+  if (platform === "darwin") {
+    spawn("open", ["-a", "Terminal", dir], { detached: true, stdio: "ignore" });
+  } else if (platform === "linux") {
+    // Try common terminal emulators
+    for (const term of ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"]) {
+      try {
+        spawn(term, ["--working-directory", dir], { detached: true, stdio: "ignore" });
+        break;
+      } catch { continue; }
+    }
+  } else if (platform === "win32") {
+    spawn("cmd", ["/c", "start", "cmd", "/K", `cd /d ${dir}`], { detached: true, stdio: "ignore" });
+  }
+
+  return c.json({ ok: true });
+});
+
+// Detect installed editors
+const EDITORS = [
+  { id: "cursor", name: "Cursor", cmd: "cursor", test: "cursor" },
+  { id: "vscode", name: "VS Code", cmd: "code", test: "code" },
+  { id: "zed", name: "Zed", cmd: "zed", test: "zed" },
+  { id: "webstorm", name: "WebStorm", cmd: "webstorm", test: "webstorm" },
+  { id: "idea", name: "IntelliJ IDEA", cmd: "idea", test: "idea" },
+  { id: "sublime", name: "Sublime Text", cmd: "subl", test: "subl" },
+  { id: "vim", name: "Vim", cmd: "vim", test: "vim" },
+  { id: "nano", name: "Nano", cmd: "nano", test: "nano" },
+];
+
+import { execSync } from "child_process";
+
+app.get("/api/editors", (c) => {
+  const available = EDITORS.filter((e) => {
+    try {
+      execSync(`which ${e.test}`, { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  return c.json(available);
+});
+
+app.post("/api/editor/open", async (c) => {
+  const body = await c.req.json();
+  const { filePath, editor } = body;
+  if (!filePath || !editor) return c.json({ error: "filePath and editor required" }, 400);
+
+  const editorConfig = EDITORS.find((e) => e.id === editor);
+  if (!editorConfig) return c.json({ error: "Unknown editor" }, 404);
+
+  spawn(editorConfig.cmd, [filePath], { detached: true, stdio: "ignore" });
+  return c.json({ ok: true });
+});
+
 app.use("/*", serveStatic({ root: "./dist/client" }));
 app.get("/*", serveStatic({ root: "./dist/client", path: "index.html" }));
 
@@ -78,7 +140,34 @@ function broadcastAll(msg: object) {
   }
 }
 
+// Debounced save — avoids blocking the event loop during heavy streaming
+const saveTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
 function saveEvents(session: AgentSession) {
+  const existing = saveTimers.get(session.projectId);
+  if (existing) clearTimeout(existing);
+
+  saveTimers.set(
+    session.projectId,
+    setTimeout(() => {
+      saveTimers.delete(session.projectId);
+      db.update(conversations)
+        .set({
+          eventsJson: JSON.stringify(session.events),
+          claudeSessionId: session.claudeSessionId,
+        })
+        .where(eq(conversations.id, session.conversationId))
+        .run();
+    }, 2000)
+  );
+}
+
+// Force save (used on process exit)
+function saveEventsNow(session: AgentSession) {
+  const existing = saveTimers.get(session.projectId);
+  if (existing) clearTimeout(existing);
+  saveTimers.delete(session.projectId);
+
   db.update(conversations)
     .set({
       eventsJson: JSON.stringify(session.events),
@@ -228,7 +317,7 @@ function sendMessage(session: AgentSession, message: string) {
         }
 
         console.log(`[agent:${session.projectId}] ${event.type}${event.subtype ? `:${event.subtype}` : ""}`);
-        broadcast(session, { type: "agent:event", event });
+        broadcast(session, { type: "agent:event", event, eventIndex: session.events.length });
         saveEvents(session);
       } catch {
         broadcast(session, { type: "agent:raw", data: line });
@@ -244,6 +333,7 @@ function sendMessage(session: AgentSession, message: string) {
     console.log(`[agent:${session.projectId}] done code=${code}`);
     session.currentProcess = null;
     session.status = "idle";
+    saveEventsNow(session);
     broadcast(session, { type: "agent:done", code });
     const finalStatus = code === 0 ? "done" : "error";
     broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: finalStatus });
@@ -373,12 +463,7 @@ wss.on("connection", (ws) => {
     console.log(`[ws] received: ${text.slice(0, 200)}`);
     try {
       const msg = JSON.parse(text);
-      // Route terminal messages separately
-      if (msg.type?.startsWith("term:")) {
-        handleTerminalMessage(ws, msg);
-      } else {
-        handleWsMessage(ws, msg);
-      }
+      handleWsMessage(ws, msg);
     } catch {
       ws.send(JSON.stringify({ type: "error", data: "Invalid message" }));
     }
@@ -390,12 +475,6 @@ wss.on("connection", (ws) => {
       agentSessions.get(projectId)?.subscribers.delete(ws);
     }
     wsSubscriptions.delete(ws);
-    // Detach terminals (don't kill — they survive reconnects)
-    for (const state of terminalStates.values()) {
-      if (state.subscriber === ws) {
-        state.subscriber = null;
-      }
-    }
   });
 });
 
@@ -426,13 +505,20 @@ function handleWsMessage(ws: WebSocket, msg: WsMessage) {
       }
     }
 
-    if (session && session.events.length > 0) {
+    if (session) {
+      // Always add as subscriber so we get live events (even during running)
       session.subscribers.add(ws);
-      ws.send(JSON.stringify({
-        type: "agent:history",
-        events: session.events,
-        status: session.status,
-      }));
+
+      if (session.events.length > 0) {
+        ws.send(JSON.stringify({
+          type: "agent:history",
+          events: session.events,
+          status: session.status,
+          eventCount: session.events.length,
+        }));
+      } else {
+        ws.send(JSON.stringify({ type: "agent:ready", projectId: msg.projectId }));
+      }
     } else {
       ws.send(JSON.stringify({ type: "agent:ready", projectId: msg.projectId }));
     }
@@ -446,161 +532,6 @@ function handleWsMessage(ws: WebSocket, msg: WsMessage) {
   }
 }
 
-// ─── Terminal (multiplexed on main WS) ──────────────────────
-
-interface TerminalState {
-  cwd: string;
-  currentProc: ChildProcess | null;
-  outputHistory: string[]; // Keep last N lines for replay on reconnect
-  subscriber: WebSocket | null;
-}
-
-// Terminals keyed by termId — survive WS disconnects
-const terminalStates = new Map<string, TerminalState>();
-const MAX_TERMINAL_HISTORY = 200;
-
-import { existsSync, statSync, readdirSync } from "fs";
-
-function termSend(state: TerminalState, msg: object) {
-  if (state.subscriber?.readyState === WebSocket.OPEN) {
-    state.subscriber.send(JSON.stringify(msg));
-  }
-}
-
-function handleTerminalMessage(ws: WebSocket, msg: any) {
-  const termId = msg.termId as string;
-  if (!termId) return;
-
-  if (msg.type === "term:start") {
-    const existing = terminalStates.get(termId);
-    if (existing) {
-      // Reconnect to existing terminal
-      console.log(`[terminal:${termId}] reconnect (${existing.outputHistory.length} lines buffered)`);
-      existing.subscriber = ws;
-      // Replay history
-      ws.send(JSON.stringify({
-        type: "term:history",
-        termId,
-        lines: existing.outputHistory,
-        cwd: existing.cwd,
-        running: existing.currentProc !== null,
-      }));
-      return;
-    }
-
-    console.log(`[terminal:${termId}] start in ${msg.cwd}`);
-    const state: TerminalState = {
-      cwd: msg.cwd || ROOT_DIR,
-      currentProc: null,
-      outputHistory: [],
-      subscriber: ws,
-    };
-    terminalStates.set(termId, state);
-    ws.send(JSON.stringify({
-      type: "term:cwd",
-      termId,
-      cwd: msg.cwd || ROOT_DIR,
-    }));
-  } else if (msg.type === "term:command") {
-    const state = terminalStates.get(termId);
-    if (!state) return;
-    state.subscriber = ws; // Always update subscriber
-
-    const cmd = msg.data?.trim();
-    if (!cmd) return;
-
-    console.log(`[terminal:${termId}] exec: ${cmd.slice(0, 80)}`);
-
-    // Store the command in history
-    state.outputHistory.push(`$ ${cmd}`);
-    if (state.outputHistory.length > MAX_TERMINAL_HISTORY) {
-      state.outputHistory.splice(0, state.outputHistory.length - MAX_TERMINAL_HISTORY);
-    }
-
-    // Handle cd
-    if (cmd.startsWith("cd ")) {
-      const target = cmd.slice(3).trim().replace(/^~/, process.env.HOME || "");
-      const resolved = resolve(state.cwd, target);
-      if (existsSync(resolved) && statSync(resolved).isDirectory()) {
-        state.cwd = resolved;
-        termSend(state, { type: "term:cwd", termId, cwd: resolved });
-      } else {
-        const err = `cd: no such directory: ${target}\n`;
-        state.outputHistory.push(err);
-        termSend(state, { type: "term:data", termId, data: err });
-      }
-      termSend(state, { type: "term:done", termId, code: 0 });
-      return;
-    }
-
-    const proc = spawn("bash", ["-c", cmd], {
-      cwd: state.cwd,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    state.currentProc = proc;
-
-    proc.stdout!.on("data", (data: Buffer) => {
-      const text = data.toString();
-      state.outputHistory.push(text);
-      if (state.outputHistory.length > MAX_TERMINAL_HISTORY) {
-        state.outputHistory.splice(0, state.outputHistory.length - MAX_TERMINAL_HISTORY);
-      }
-      termSend(state, { type: "term:data", termId, data: text });
-    });
-
-    proc.stderr!.on("data", (data: Buffer) => {
-      const text = data.toString();
-      state.outputHistory.push(text);
-      termSend(state, { type: "term:data", termId, data: text });
-    });
-
-    proc.on("close", (code) => {
-      state.currentProc = null;
-      if (code !== 0) {
-        state.outputHistory.push(`[exit ${code}]`);
-      }
-      termSend(state, { type: "term:done", termId, code });
-    });
-  } else if (msg.type === "term:complete") {
-    const state = terminalStates.get(termId);
-    if (!state) return;
-
-    const partial = (msg.data ?? "") as string;
-    // Get the last "word" being typed
-    const parts = partial.split(/\s+/);
-    const lastWord = parts[parts.length - 1] || "";
-
-    // Determine directory and prefix to complete
-    const lastSlash = lastWord.lastIndexOf("/");
-    const dir = lastSlash >= 0 ? resolve(state.cwd, lastWord.slice(0, lastSlash + 1)) : state.cwd;
-    const prefix = lastSlash >= 0 ? lastWord.slice(lastSlash + 1) : lastWord;
-
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true });
-      const matches = entries
-        .filter((e) => !e.name.startsWith(".") && e.name.toLowerCase().startsWith(prefix.toLowerCase()))
-        .map((e) => e.name + (e.isDirectory() ? "/" : ""))
-        .sort();
-
-      ws.send(JSON.stringify({
-        type: "term:completions",
-        termId,
-        matches,
-        prefix,
-      }));
-    } catch {
-      ws.send(JSON.stringify({ type: "term:completions", termId, matches: [], prefix }));
-    }
-  } else if (msg.type === "term:kill") {
-    const state = terminalStates.get(termId);
-    if (state?.currentProc) state.currentProc.kill("SIGTERM");
-  } else if (msg.type === "term:close") {
-    const state = terminalStates.get(termId);
-    if (state?.currentProc) state.currentProc.kill();
-    terminalStates.delete(termId);
-  }
-}
+import { existsSync, statSync } from "fs";
 
 export { app, PORT, ROOT_DIR };

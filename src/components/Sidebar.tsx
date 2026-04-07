@@ -108,16 +108,17 @@ export function ProjectSidebar({
       <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover/project:opacity-100 transition-opacity">
         <Tooltip>
           <TooltipTrigger>
-            <button
+            <span
+              role="button"
               onClick={(e) => toggleHidden(e, p)}
-              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent"
+              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent cursor-pointer"
             >
               {p.hidden ? (
                 <Eye className="h-3 w-3 text-sidebar-foreground/50" />
               ) : (
                 <EyeOff className="h-3 w-3 text-sidebar-foreground/50" />
               )}
-            </button>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="right" className="text-xs">
             {p.hidden ? "Afficher" : "Cacher"}
@@ -126,9 +127,10 @@ export function ProjectSidebar({
 
         <Tooltip>
           <TooltipTrigger>
-            <button
+            <span
+              role="button"
               onClick={(e) => toggleFavorite(e, p)}
-              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent"
+              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent cursor-pointer"
             >
               <Star
                 className={cn(
@@ -138,7 +140,7 @@ export function ProjectSidebar({
                     : "text-sidebar-foreground/50"
                 )}
               />
-            </button>
+            </span>
           </TooltipTrigger>
           <TooltipContent side="right" className="text-xs">
             {p.favorite ? "Retirer des favoris" : "Favori"}

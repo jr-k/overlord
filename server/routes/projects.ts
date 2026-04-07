@@ -82,17 +82,24 @@ app.patch("/:id", async (c) => {
   return c.json(updated);
 });
 
-// POST /api/projects/scan - scan root dir for git projects
-app.post("/scan", (c) => {
+// POST /api/projects/scan - scan root dir for projects
+// ?gitOnly=true to only scan git repos (default: scan all directories)
+app.post("/scan", async (c) => {
   const rootDir = (c.get("rootDir" as never) as string) || process.cwd();
+  const body = await c.req.json().catch(() => ({}));
+  const gitOnly = body.gitOnly ?? false;
   const found: string[] = [];
 
   try {
     const entries = readdirSync(rootDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && !entry.name.startsWith(".")) {
-        const projectPath = join(rootDir, entry.name);
-        if (existsSync(join(projectPath, ".git"))) {
+        if (gitOnly) {
+          const projectPath = join(rootDir, entry.name);
+          if (existsSync(join(projectPath, ".git"))) {
+            found.push(entry.name);
+          }
+        } else {
           found.push(entry.name);
         }
       }
@@ -122,6 +129,23 @@ app.post("/scan", (c) => {
   }
 
   return c.json(upserted);
+});
+
+// POST /api/projects/add - add a specific directory as a project
+app.post("/add", async (c) => {
+  const body = await c.req.json();
+  const path = body.path?.trim();
+  if (!path) return c.json({ error: "Path required" }, 400);
+
+  if (!existsSync(path)) return c.json({ error: "Directory not found" }, 404);
+
+  const name = body.name || path.split("/").pop() || "unknown";
+  const existing = db.select().from(projects).where(eq(projects.path, path)).get();
+  if (!existing) {
+    db.insert(projects).values({ name, path }).run();
+  }
+  const project = db.select().from(projects).where(eq(projects.path, path)).get();
+  return c.json(project);
 });
 
 export default app;
