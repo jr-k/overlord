@@ -25,7 +25,7 @@ A local web-based project multiplexer with integrated Claude AI agents. Manage m
 git clone https://github.com/poptocrack/overlord.git
 cd overlord
 
-# Install dependencies
+# Install dependencies (also installs and configures RTK automatically)
 npm install
 
 # Start the dev server (backend + frontend)
@@ -33,6 +33,8 @@ npm run dev
 
 # Open http://localhost:4748 in your browser
 ```
+
+`npm install` automatically sets up [RTK](https://github.com/rtk-ai/rtk) (Rust Token Killer) which reduces token consumption by 60-90% for Claude agents. If you prefer to skip this, set `RTK_SKIP=1` before installing.
 
 On first launch, click **"Scanner les projets"** in the sidebar to detect git repositories.
 
@@ -108,7 +110,8 @@ overlord/
 | Backend | Hono, Node.js |
 | Database | SQLite via better-sqlite3 + Drizzle ORM |
 | AI | Claude Code CLI (`--print --output-format stream-json`) |
-| Protocol | WebSocket (chat streaming, terminal), MCP |
+| Token optimization | [RTK](https://github.com/rtk-ai/rtk) (60-90% token savings on shell commands) |
+| Protocol | WebSocket (chat streaming), MCP |
 
 ## Scripts
 

@@ -10,6 +10,7 @@
     "dev": "concurrently -n server,client -c blue,green \"tsx watch server/index.ts\" \"vite\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
+    "postinstall": "bash scripts/setup-rtk.sh",
     "build": "vite build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

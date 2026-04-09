@@ -96,6 +96,80 @@ app.post("/api/editor/open", async (c) => {
   return c.json({ ok: true });
 });
 
+// RTK token savings per project
+app.get("/api/rtk/gain/:projectId", (c) => {
+  const projectId = Number(c.req.param("projectId"));
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  try {
+    const output = execSync("rtk gain --project --format json", {
+      cwd: project.path,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    return c.json(JSON.parse(output));
+  } catch {
+    return c.json({ summary: null });
+  }
+});
+
+// Rollback to a git snapshot
+app.post("/api/agent/rollback", async (c) => {
+  const body = await c.req.json();
+  const { projectId, snapshotSha, messageIndex } = body;
+
+  if (!projectId || !snapshotSha) return c.json({ error: "projectId and snapshotSha required" }, 400);
+
+  const session = agentSessions.get(projectId);
+  if (!session) return c.json({ error: "No session found" }, 404);
+
+  // Check if safe to rollback
+  const commitsSince = getCommitsSince(session.projectPath, snapshotSha);
+  if (commitsSince > 0) {
+    return c.json({
+      error: `${commitsSince} commit(s) ont ete faits depuis ce point. Le rollback ecraserait ces changements.`,
+      commitsSince,
+      needsConfirm: true,
+    });
+  }
+
+  // Do the rollback
+  const result = rollbackToSnapshot(session.projectPath, snapshotSha);
+  if (!result.ok) {
+    return c.json({ error: result.error }, 500);
+  }
+
+  // Trim events: remove everything from this message onwards
+  if (typeof messageIndex === "number" && messageIndex >= 0) {
+    session.events = session.events.slice(0, messageIndex);
+    saveEventsNow(session);
+  }
+
+  return c.json({ ok: true });
+});
+
+// Force rollback (even with commits)
+app.post("/api/agent/rollback/force", async (c) => {
+  const body = await c.req.json();
+  const { projectId, snapshotSha, messageIndex } = body;
+
+  if (!projectId || !snapshotSha) return c.json({ error: "projectId and snapshotSha required" }, 400);
+
+  const session = agentSessions.get(projectId);
+  if (!session) return c.json({ error: "No session found" }, 404);
+
+  const result = rollbackToSnapshot(session.projectPath, snapshotSha);
+  if (!result.ok) return c.json({ error: result.error }, 500);
+
+  if (typeof messageIndex === "number" && messageIndex >= 0) {
+    session.events = session.events.slice(0, messageIndex);
+    saveEventsNow(session);
+  }
+
+  return c.json({ ok: true });
+});
+
 app.use("/*", serveStatic({ root: "./dist/client" }));
 app.get("/*", serveStatic({ root: "./dist/client", path: "index.html" }));
 
@@ -238,11 +312,76 @@ function getOrCreateSession(projectId: number, projectPath: string): AgentSessio
   return session;
 }
 
+// ─── Git Snapshots ───────────────────────────────────────────
+
+function createGitSnapshot(cwd: string): string | null {
+  try {
+    // Stage everything (including untracked) then create stash, then reset
+    execSync("git add -A", { cwd, stdio: "ignore" });
+    const sha = execSync("git stash create", { cwd, encoding: "utf-8", timeout: 5000 }).trim();
+    execSync("git reset", { cwd, stdio: "ignore" });
+
+    if (!sha) {
+      // No changes to snapshot — return current HEAD
+      return execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", timeout: 3000 }).trim();
+    }
+    return sha;
+  } catch (err) {
+    console.log(`[git] snapshot failed:`, err);
+    return null;
+  }
+}
+
+function getCommitsSince(cwd: string, sha: string): number {
+  try {
+    // Count commits between sha and HEAD
+    const count = execSync(`git rev-list --count ${sha}..HEAD`, { cwd, encoding: "utf-8", timeout: 3000 }).trim();
+    return parseInt(count, 10) || 0;
+  } catch {
+    return -1; // Can't determine
+  }
+}
+
+function rollbackToSnapshot(cwd: string, sha: string): { ok: boolean; error?: string } {
+  try {
+    // Check for commits since snapshot
+    const commitsSince = getCommitsSince(cwd, sha);
+    if (commitsSince > 0) {
+      return { ok: false, error: `${commitsSince} commit(s) depuis ce snapshot. Rollback non securise.` };
+    }
+
+    // Restore files from the snapshot
+    execSync(`git checkout ${sha} -- .`, { cwd, stdio: "ignore", timeout: 10000 });
+    // Clean untracked files that Claude may have created
+    execSync("git clean -fd --exclude=node_modules --exclude=.env", { cwd, stdio: "ignore", timeout: 10000 });
+    // Unstage everything
+    execSync("git reset", { cwd, stdio: "ignore" });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 function sendMessage(session: AgentSession, message: string) {
   if (session.currentProcess) {
     console.log(`[agent:${session.projectId}] already running, queuing not implemented`);
     return;
   }
+
+  // Git snapshot before Claude works
+  const snapshotSha = createGitSnapshot(session.projectPath);
+  console.log(`[agent:${session.projectId}] snapshot: ${snapshotSha ?? "none"}`);
+
+  // Store user message with snapshot SHA in events
+  const eventIndex = session.events.length;
+  session.events.push({ type: "user_message", content: message, snapshotSha });
+  saveEvents(session);
+  db.insert(messages)
+    .values({ conversationId: session.conversationId, role: "user", content: message })
+    .run();
+
+  // Notify clients of the snapshot so the rollback button appears immediately
+  broadcast(session, { type: "agent:snapshot", snapshotSha, eventIndex, message });
 
   // MCP config pointing to Overlord's MCP server
   const mcpConfig = JSON.stringify({
@@ -262,6 +401,7 @@ function sendMessage(session: AgentSession, message: string) {
     "--include-partial-messages",
     "--mcp-config", mcpConfig,
     "--allowedTools", "Edit", "Write", "Read", "Bash", "Glob", "Grep", "NotebookEdit",
+    "WebFetch", "WebSearch", "ToolSearch", "Agent",
     "mcp__overlord__overlord_list_todos", "mcp__overlord__overlord_add_todo",
     "mcp__overlord__overlord_complete_todo", "mcp__overlord__overlord_delete_todo",
     "mcp__overlord__overlord_list_projects", "mcp__overlord__overlord_get_project",
@@ -289,13 +429,6 @@ function sendMessage(session: AgentSession, message: string) {
   session.status = "running";
   broadcast(session, { type: "agent:running" });
   broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "running" });
-
-  // Store user message in events (for replay) and DB
-  session.events.push({ type: "user_message", content: message });
-  saveEvents(session);
-  db.insert(messages)
-    .values({ conversationId: session.conversationId, role: "user", content: message })
-    .run();
 
   // Parse stdout line by line
   let buffer = "";
@@ -527,7 +660,7 @@ function handleWsMessage(ws: WebSocket, msg: WsMessage) {
     session.subscribers.add(ws);
     wsSubscriptions.set(ws, msg.projectId);
 
-    broadcast(session, { type: "agent:start" });
+    broadcast(session, { type: "agent:start", message: msg.message });
     sendMessage(session, msg.message);
   }
 }

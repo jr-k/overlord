@@ -2,20 +2,31 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Square, Copy, Check, ArrowDown } from "lucide-react";
+import { Square, Copy, Check, ArrowDown, Undo2, Plus } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolUseCard } from "./ToolUseCard.js";
 import type { Project } from "../types.js";
 
 type AgentStatus = "idle" | "waiting" | "running";
 
+interface PastedBlock {
+  id: string;
+  content: string;
+  lineCount: number;
+}
+
 interface ChatEntry {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  displayContent?: string; // What to show in UI (may differ from content sent to Claude)
+  pastedBlocks?: PastedBlock[];
   toolName?: string;
   toolInput?: Record<string, any>;
   toolResult?: string;
+  snapshotSha?: string;
+  eventIndex?: number;
 }
 
 interface Props {
@@ -36,10 +47,17 @@ function extractFromEvents(events: any[]): ChatEntry[] {
     }
   }
 
-  for (const ev of events) {
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
     if (ev.type === "user_message") {
       flushText();
-      entries.push({ id: crypto.randomUUID(), role: "user", content: ev.content });
+      entries.push({
+        id: crypto.randomUUID(),
+        role: "user",
+        content: ev.content,
+        snapshotSha: ev.snapshotSha ?? undefined,
+        eventIndex: i,
+      });
     } else if (ev.type === "assistant") {
       const blocks = ev.message?.content ?? [];
       for (const block of blocks) {
@@ -77,7 +95,165 @@ function extractFromEvents(events: any[]): ChatEntry[] {
   return entries;
 }
 
-function MessageBubble({ content }: { content: string }) {
+function PastedBadge({ block }: { block: PastedBlock }) {
+  const [showPreview, setShowPreview] = useState(false);
+
+  return (
+    <span
+      className="relative inline-flex items-center rounded-md bg-primary-foreground/20 border border-primary-foreground/30 px-2 py-0.5 text-[11px] font-mono cursor-default"
+      onMouseEnter={() => setShowPreview(true)}
+      onMouseLeave={() => setShowPreview(false)}
+    >
+      [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
+      {showPreview && (
+        <div className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg z-50 font-mono whitespace-pre-wrap">
+          {block.content.slice(0, 2000)}
+          {block.content.length > 2000 && "\n..."}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function AddToTodoButton({ content, projectId }: { content: string; projectId: number }) {
+  const [added, setAdded] = useState(false);
+
+  const handleAdd = useCallback(async () => {
+    const title = content.slice(0, 100).split("\n")[0];
+    const description = content.length > 100 ? content.slice(0, 500) : undefined;
+    await fetch("/api/todos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, title, description }),
+    });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
+  }, [content, projectId]);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <span
+          role="button"
+          onClick={handleAdd}
+          className="flex h-6 w-6 items-center justify-center rounded-md opacity-0 group-hover/msg:opacity-100 transition-opacity hover:bg-secondary cursor-pointer"
+        >
+          {added ? (
+            <Check className="h-3 w-3 text-green-400" />
+          ) : (
+            <Plus className="h-3 w-3 text-muted-foreground" />
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" className="text-xs">
+        Ajouter aux todos
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function UserMessage({
+  entry,
+  projectId,
+  onRollback,
+}: {
+  entry: ChatEntry;
+  projectId: number;
+  onRollback: (content: string) => void;
+}) {
+  const [rolling, setRolling] = useState(false);
+  const [confirmNeeded, setConfirmNeeded] = useState<string | null>(null);
+
+  const handleRollback = useCallback(async (force = false) => {
+    if (!entry.snapshotSha) return;
+    setRolling(true);
+
+    const endpoint = force ? "/api/agent/rollback/force" : "/api/agent/rollback";
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        snapshotSha: entry.snapshotSha,
+        messageIndex: entry.eventIndex,
+      }),
+    });
+    const data = await res.json();
+
+    if (data.needsConfirm) {
+      setConfirmNeeded(data.error);
+      setRolling(false);
+      return;
+    }
+
+    if (data.ok) {
+      onRollback(entry.content);
+    }
+    setRolling(false);
+  }, [entry, projectId, onRollback]);
+
+  return (
+    <div className="group/user ml-auto max-w-[80%]">
+      {/* Confirm dialog */}
+      {confirmNeeded && (
+        <div className="mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <p>{confirmNeeded}</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => handleRollback(true)}
+              className="rounded bg-destructive px-2 py-1 text-[11px] text-white hover:bg-destructive/80"
+            >
+              Rollback quand meme
+            </button>
+            <button
+              onClick={() => setConfirmNeeded(null)}
+              className="rounded bg-secondary px-2 py-1 text-[11px] hover:bg-secondary/80"
+            >
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="relative rounded-lg bg-primary px-4 py-3 text-primary-foreground">
+        {/* Rollback button */}
+        {entry.snapshotSha && (
+          <button
+            onClick={() => handleRollback()}
+            disabled={rolling}
+            className="absolute -left-8 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-md opacity-0 group-hover/user:opacity-100 transition-opacity hover:bg-secondary"
+            title="Rollback: restaurer le code et remettre le message dans l'input"
+          >
+            <Undo2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        )}
+        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
+          Toi
+        </div>
+        <div className="text-sm leading-relaxed select-text">
+          {/* Show typed text */}
+          {entry.displayContent && (
+            <div className="whitespace-pre-wrap">{entry.displayContent}</div>
+          )}
+          {/* Show pasted blocks as badges */}
+          {entry.pastedBlocks && entry.pastedBlocks.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {entry.pastedBlocks.map((block) => (
+                <PastedBadge key={block.id} block={block} />
+              ))}
+            </div>
+          )}
+          {/* Fallback: no display info, show raw content */}
+          {!entry.displayContent && !entry.pastedBlocks && (
+            <div className="whitespace-pre-wrap">{entry.content}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ content, projectId }: { content: string; projectId: number }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -92,17 +268,25 @@ function MessageBubble({ content }: { content: string }) {
         <span className="text-[10px] font-semibold uppercase tracking-wider opacity-50">
           Claude
         </span>
-        <button
-          onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/msg:opacity-100 hover:bg-secondary"
-          title="Copier le markdown"
-        >
-          {copied ? (
-            <Check className="h-3 w-3 text-green-400" />
-          ) : (
-            <Copy className="h-3 w-3 text-muted-foreground" />
-          )}
-        </button>
+        <div className="flex items-center gap-0.5">
+          <AddToTodoButton content={content} projectId={projectId} />
+          <Tooltip>
+            <TooltipTrigger>
+              <span
+                role="button"
+                onClick={handleCopy}
+                className="flex h-6 w-6 items-center justify-center rounded-md opacity-0 transition-opacity group-hover/msg:opacity-100 hover:bg-secondary cursor-pointer"
+              >
+                {copied ? (
+                  <Check className="h-3 w-3 text-green-400" />
+                ) : (
+                  <Copy className="h-3 w-3 text-muted-foreground" />
+                )}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="text-xs">Copier le markdown</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       <div className="select-text">
         <MarkdownContent content={content} />
@@ -120,6 +304,32 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [elapsed, setElapsed] = useState(0);
+
+  // Token usage tracking
+  const [tokenStats, setTokenStats] = useState({
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalCost: 0,
+    turns: 0,
+  });
+
+  // RTK savings
+  const [rtkSavings, setRtkSavings] = useState<{
+    total_commands: number;
+    total_input: number;
+    total_output: number;
+    total_saved: number;
+    avg_savings_pct: number;
+  } | null>(null);
+
+  // Message queue — messages typed while agent is working
+  const [messageQueue, setMessageQueue] = useState<string[]>([]);
+
+  // Pasted content — stored separately, shown as badges
+  const [pastedBlocks, setPastedBlocks] = useState<{ id: string; content: string; lineCount: number }[]>([]);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialScrollDone = useRef(false);
   const userScrolledUp = useRef(false);
@@ -150,6 +360,17 @@ export function ChatTab({ project, input, onInputChange }: Props) {
     if (!input.startsWith("/")) setSlashDismissed(false);
     setSlashIndex(0);
   }, [input]);
+
+  // Fetch RTK savings when turns change
+  useEffect(() => {
+    if (tokenStats.turns === 0) return;
+    fetch(`/api/rtk/gain/${project.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.summary) setRtkSavings(data.summary);
+      })
+      .catch(() => {});
+  }, [tokenStats.turns, project.id]);
 
   // Timer
   useEffect(() => {
@@ -221,11 +442,24 @@ export function ChatTab({ project, input, onInputChange }: Props) {
         setEntries(parsed);
         setStreamingText("");
         lastEventIndexRef.current = msg.eventCount ?? msg.events.length;
+
+        // Rebuild token stats from history
+        let stats = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0, turns: 0 };
         for (const ev of msg.events) {
           if (ev.type === "system" && ev.subtype === "init" && ev.slash_commands) {
             setSlashCommands((prev) => [...new Set([...BUILTIN_COMMANDS, ...ev.slash_commands])]);
           }
+          if (ev.type === "result" && ev.usage) {
+            stats.inputTokens += ev.usage.input_tokens ?? 0;
+            stats.outputTokens += ev.usage.output_tokens ?? 0;
+            stats.cacheReadTokens += ev.usage.cache_read_input_tokens ?? 0;
+            stats.cacheWriteTokens += ev.usage.cache_creation_input_tokens ?? 0;
+            stats.totalCost += ev.total_cost_usd ?? 0;
+            stats.turns += 1;
+          }
         }
+        setTokenStats(stats);
+
         if (msg.status === "running") setAgentStatus("running");
         else setAgentStatus("idle");
       } else if (msg.type === "agent:ready") {
@@ -233,6 +467,18 @@ export function ChatTab({ project, input, onInputChange }: Props) {
       } else if (msg.type === "agent:start") {
         setAgentStatus("waiting");
         setStreamingText("");
+      } else if (msg.type === "agent:snapshot") {
+        // Patch the last user message with the snapshot SHA
+        setEntries((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].role === "user" && updated[i].content === msg.message) {
+              updated[i] = { ...updated[i], snapshotSha: msg.snapshotSha, eventIndex: msg.eventIndex };
+              break;
+            }
+          }
+          return updated;
+        });
       } else if (msg.type === "agent:running") {
         setAgentStatus("running");
       } else if (msg.type === "agent:event") {
@@ -332,6 +578,18 @@ export function ChatTab({ project, input, onInputChange }: Props) {
             }
             return "";
           });
+
+          // Capture token stats
+          if (ev.usage) {
+            setTokenStats((prev) => ({
+              inputTokens: prev.inputTokens + (ev.usage.input_tokens ?? 0),
+              outputTokens: prev.outputTokens + (ev.usage.output_tokens ?? 0),
+              cacheReadTokens: prev.cacheReadTokens + (ev.usage.cache_read_input_tokens ?? 0),
+              cacheWriteTokens: prev.cacheWriteTokens + (ev.usage.cache_creation_input_tokens ?? 0),
+              totalCost: prev.totalCost + (ev.total_cost_usd ?? 0),
+              turns: prev.turns + 1,
+            }));
+          }
         }
       } else if (msg.type === "agent:done") {
         setStreamingText((prev) => {
@@ -343,7 +601,40 @@ export function ChatTab({ project, input, onInputChange }: Props) {
           }
           return "";
         });
-        setAgentStatus("idle");
+
+        // Desktop notification
+        if (document.hidden && Notification.permission === "granted") {
+          new Notification(`Overlord — ${project.name}`, {
+            body: "Claude a termine son travail.",
+            icon: "/favicon.ico",
+          });
+        }
+
+        // Process message queue — send next queued message
+        setMessageQueue((queue) => {
+          if (queue.length > 0 && ws.readyState === WebSocket.OPEN) {
+            const [next, ...rest] = queue;
+            // Send after a small delay so state settles
+            setTimeout(() => {
+              setAgentStatus("waiting");
+              setEntries((prev) => [
+                ...prev,
+                { id: crypto.randomUUID(), role: "user", content: next },
+              ]);
+              ws.send(
+                JSON.stringify({
+                  type: "chat",
+                  projectId: project.id,
+                  projectPath: project.path,
+                  message: next,
+                })
+              );
+            }, 500);
+            return rest;
+          }
+          setAgentStatus("idle");
+          return queue;
+        });
       }
     };
 
@@ -351,14 +642,38 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   }, [project.id, project.path]);
 
   const handleSend = useCallback(() => {
-    if (!input.trim() || !wsRef.current) return;
-    const msg = input.trim();
+    // Build full message: typed text + pasted blocks
+    const currentBlocks = [...pastedBlocks];
+    const pastedContent = currentBlocks.map((b) => b.content).join("\n\n");
+    const typedText = input.trim();
+    const fullMessage = [typedText, pastedContent].filter(Boolean).join("\n\n");
+    if (!fullMessage || !wsRef.current) return;
+
+    setSlashDismissed(true);
+    onInputChange("");
+    setPastedBlocks([]);
+
+    // Request notification permission on first interaction
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
+    // If agent is working, queue the message
+    if (agentStatus !== "idle") {
+      setMessageQueue((prev) => [...prev, fullMessage]);
+      return;
+    }
 
     setAgentStatus("waiting");
-    setSlashDismissed(true);
     setEntries((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), role: "user", content: msg },
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: fullMessage,
+        displayContent: typedText || undefined,
+        pastedBlocks: currentBlocks.length > 0 ? currentBlocks : undefined,
+      },
     ]);
 
     wsRef.current.send(
@@ -366,12 +681,10 @@ export function ChatTab({ project, input, onInputChange }: Props) {
         type: "chat",
         projectId: project.id,
         projectPath: project.path,
-        message: msg,
+        message: fullMessage,
       })
     );
-
-    onInputChange("");
-  }, [input, project, onInputChange]);
+  }, [input, pastedBlocks, project, onInputChange, agentStatus]);
 
   const handleStop = useCallback(() => {
     if (!wsRef.current) return;
@@ -422,6 +735,11 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   const formatElapsed = (s: number) =>
     s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`;
 
+  const formatTokens = (n: number) =>
+    n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` :
+    n >= 1000 ? `${(n / 1000).toFixed(1)}k` :
+    String(n);
+
   const isWorking = agentStatus === "waiting" || agentStatus === "running";
 
   return (
@@ -464,6 +782,42 @@ export function ChatTab({ project, input, onInputChange }: Props) {
               {agentStatus === "waiting" && `Demarrage ${formatElapsed(elapsed)}`}
               {agentStatus === "running" && `En cours ${formatElapsed(elapsed)}`}
             </Badge>
+          )}
+          {tokenStats.turns > 0 && (
+            <Tooltip>
+              <TooltipTrigger>
+                <div className="hidden sm:flex items-center gap-2 text-[10px] text-muted-foreground font-mono cursor-help">
+                  <span>{formatTokens(tokenStats.inputTokens)} in</span>
+                  <span>{formatTokens(tokenStats.outputTokens)} out</span>
+                  {tokenStats.cacheReadTokens > 0 && (
+                    <span className="text-green-400/70">
+                      {formatTokens(tokenStats.cacheReadTokens)} cache
+                    </span>
+                  )}
+                  <span className="text-primary/70">
+                    ${tokenStats.totalCost.toFixed(4)}
+                  </span>
+                  {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
+                    <span className="text-emerald-400 font-semibold">
+                      RTK -{Math.round(rtkSavings.avg_savings_pct)}%
+                    </span>
+                  )}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
+                <div className="space-y-1.5 font-sans">
+                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong> — tokens envoyes a Claude (votre message + contexte projet)</p>
+                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong> — tokens generes par Claude (sa reponse)</p>
+                  {tokenStats.cacheReadTokens > 0 && (
+                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong> — tokens lus depuis le cache au lieu d'etre re-traites (economie de cout)</p>
+                  )}
+                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cout API cumule de cette session ({tokenStats.turns} echange{tokenStats.turns > 1 ? "s" : ""})</p>
+                  {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
+                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens economises par RTK sur {rtkSavings.total_commands} commandes shell (compresse git status, ls, etc.)</p>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
           )}
           <span
             className={cn(
@@ -514,19 +868,21 @@ export function ChatTab({ project, input, onInputChange }: Props) {
               result={entry.toolResult}
             />
           ) : entry.role === "user" ? (
-            <div
+            <UserMessage
               key={entry.id}
-              className="ml-auto max-w-[80%] rounded-lg bg-primary px-4 py-3 text-primary-foreground"
-            >
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
-                Toi
-              </div>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed select-text">
-                {entry.content}
-              </div>
-            </div>
+              entry={entry}
+              projectId={project.id}
+              onRollback={(content) => {
+                onInputChange(content);
+                // Remove this message and everything after from entries
+                setEntries((prev) => {
+                  const idx = prev.findIndex((e) => e.id === entry.id);
+                  return idx >= 0 ? prev.slice(0, idx) : prev;
+                });
+              }}
+            />
           ) : (
-            <MessageBubble key={entry.id} content={entry.content} />
+            <MessageBubble key={entry.id} content={entry.content} projectId={project.id} />
           )
         )}
 
@@ -582,30 +938,88 @@ export function ChatTab({ project, input, onInputChange }: Props) {
           </div>
         )}
 
+        {/* Queued messages indicator */}
+        {messageQueue.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-[10px] font-bold text-primary">
+              {messageQueue.length}
+            </span>
+            <span>message{messageQueue.length > 1 ? "s" : ""} en attente</span>
+            <button
+              onClick={() => setMessageQueue([])}
+              className="ml-auto text-[10px] text-muted-foreground hover:text-destructive"
+            >
+              Vider la file
+            </button>
+          </div>
+        )}
+
         <div
           className="flex items-stretch gap-2"
           style={{ minHeight: "12vh", maxHeight: "20vh" }}
         >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              agentStatus === "idle"
-                ? `Message ou / pour les commandes...`
-                : "Continuer la conversation..."
-            }
-            disabled={!connected || isWorking}
-            className="h-full flex-1 resize-none rounded-lg border border-border bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={!connected || !input.trim() || isWorking}
-            className="self-end"
-          >
-            {isWorking ? "..." : "Envoyer"}
-          </Button>
+          <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+            {/* Pasted blocks badges */}
+            {pastedBlocks.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 px-1">
+                {pastedBlocks.map((block) => (
+                  <span key={block.id} className="relative inline-flex items-center gap-1 rounded-md bg-secondary border border-border px-2 py-0.5 text-[11px] text-muted-foreground font-mono group/paste">
+                    [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
+                    <button
+                      onClick={() => setPastedBlocks((prev) => prev.filter((b) => b.id !== block.id))}
+                      className="text-muted-foreground/50 hover:text-destructive ml-0.5"
+                    >
+                      x
+                    </button>
+                    {/* Preview on hover */}
+                    <div className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg z-50 font-mono whitespace-pre-wrap hidden group-hover/paste:block">
+                      {block.content.slice(0, 2000)}
+                      {block.content.length > 2000 && "\n..."}
+                    </div>
+                  </span>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData("text");
+                const lineCount = pasted.split("\n").length;
+                // Only collapse if pasted text is long (>5 lines)
+                if (lineCount > 5) {
+                  e.preventDefault();
+                  setPastedBlocks((prev) => [
+                    ...prev,
+                    { id: crypto.randomUUID(), content: pasted, lineCount },
+                  ]);
+                }
+                // Short pastes go directly into the textarea (default behavior)
+              }}
+              placeholder={
+                isWorking
+                  ? `Taper un message (sera envoye quand Claude aura fini)...`
+                  : `Message ou / pour les commandes...`
+              }
+              disabled={!connected}
+              className={cn(
+                "flex-1 resize-none rounded-lg border bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50",
+                isWorking ? "border-yellow-400/30" : "border-border"
+              )}
+            />
+          </div>
+          <div className="flex flex-col justify-end gap-1">
+            <Button
+              onClick={handleSend}
+              disabled={!connected || (!input.trim() && pastedBlocks.length === 0)}
+              variant={isWorking ? "secondary" : "default"}
+              className="self-end"
+            >
+              {isWorking ? `En file (${messageQueue.length + 1})` : "Envoyer"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
