@@ -114,6 +114,47 @@ app.get("/api/rtk/gain/:projectId", (c) => {
   }
 });
 
+// Ask a question to another project's Claude agent
+app.post("/api/agent/ask", async (c) => {
+  const body = await c.req.json();
+  const { projectId, question } = body;
+  if (!projectId || !question) return c.json({ error: "projectId and question required" }, 400);
+
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  console.log(`[ask:${project.name}] "${question.slice(0, 80)}..."`);
+
+  const result = await new Promise<{ ok: boolean; answer?: string; error?: string; code?: number | null }>((resolve) => {
+    const proc = spawn(CLAUDE_PATH, [
+      "--print",
+      "--", question,
+    ], {
+      cwd: project.path,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let output = "";
+
+    proc.stdout!.on("data", (data: Buffer) => { output += data.toString(); });
+    proc.stderr!.on("data", () => {});
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGTERM");
+      resolve({ ok: false, error: "Timeout (3min)", answer: output.trim() });
+    }, 3 * 60 * 1000);
+
+    proc.on("close", (code) => {
+      clearTimeout(timeout);
+      console.log(`[ask:${project.name}] done code=${code} (${output.length} chars)`);
+      resolve({ ok: true, answer: output.trim(), code });
+    });
+  });
+
+  return c.json({ ...result, project: project.name });
+});
+
 // Rollback to a git snapshot
 app.post("/api/agent/rollback", async (c) => {
   const body = await c.req.json();
@@ -384,11 +425,12 @@ function sendMessage(session: AgentSession, message: string) {
   broadcast(session, { type: "agent:snapshot", snapshotSha, eventIndex, message });
 
   // MCP config pointing to Overlord's MCP server
+  const tsxBin = resolve(__dirname, "..", "node_modules", ".bin", "tsx");
   const mcpConfig = JSON.stringify({
     mcpServers: {
       overlord: {
-        command: "npx",
-        args: ["tsx", resolve(__dirname, "mcp.ts")],
+        command: tsxBin,
+        args: [resolve(__dirname, "mcp.ts")],
         env: { OVERLORD_PORT: String(PORT) },
       },
     },
@@ -399,12 +441,14 @@ function sendMessage(session: AgentSession, message: string) {
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
+    "--append-system-prompt", "Match the language of the user's message in your response. When you respond in French, always use proper accents (é, è, ê, à, â, ù, û, ç, ô, etc.) — never write French without accents.",
     "--mcp-config", mcpConfig,
     "--allowedTools", "Edit", "Write", "Read", "Bash", "Glob", "Grep", "NotebookEdit",
     "WebFetch", "WebSearch", "ToolSearch", "Agent",
     "mcp__overlord__overlord_list_todos", "mcp__overlord__overlord_add_todo",
     "mcp__overlord__overlord_complete_todo", "mcp__overlord__overlord_delete_todo",
     "mcp__overlord__overlord_list_projects", "mcp__overlord__overlord_get_project",
+    "mcp__overlord__overlord_ask_project",
   ];
 
   // Resume previous conversation if we have a session ID
@@ -433,6 +477,7 @@ function sendMessage(session: AgentSession, message: string) {
   // Parse stdout line by line
   let buffer = "";
   proc.stdout!.on("data", (data: Buffer) => {
+    resetActivityTimer();
     buffer += data.toString();
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
@@ -459,10 +504,35 @@ function sendMessage(session: AgentSession, message: string) {
   });
 
   proc.stderr!.on("data", (data: Buffer) => {
-    console.log(`[agent:${session.projectId}] stderr: ${data.toString().slice(0, 200)}`);
+    resetActivityTimer();
+    console.log(`[agent:${session.projectId}] stderr: ${data.toString().slice(0, 500)}`);
+  });
+
+  // Timeout: kill if no output for 5 minutes
+  let activityTimer = setTimeout(() => {
+    console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+    proc.kill("SIGTERM");
+  }, 5 * 60 * 1000);
+
+  const resetActivityTimer = () => {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+      proc.kill("SIGTERM");
+    }, 5 * 60 * 1000);
+  };
+
+  proc.on("error", (err) => {
+    clearTimeout(activityTimer);
+    console.log(`[agent:${session.projectId}] process error: ${err.message}`);
+    session.currentProcess = null;
+    session.status = "idle";
+    broadcast(session, { type: "agent:done", code: 1 });
+    broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "error" });
   });
 
   proc.on("close", (code) => {
+    clearTimeout(activityTimer);
     console.log(`[agent:${session.projectId}] done code=${code}`);
     session.currentProcess = null;
     session.status = "idle";

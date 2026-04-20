@@ -33,6 +33,8 @@ interface Props {
   project: Project;
   input: string;
   onInputChange: (value: string) => void;
+  activeWorkspaces: string[];
+  onToggleWorkspace: (path: string) => void;
 }
 
 // Extract readable chat entries from Claude stream-json events
@@ -295,7 +297,7 @@ function MessageBubble({ content, projectId }: { content: string; projectId: num
   );
 }
 
-export function ChatTab({ project, input, onInputChange }: Props) {
+export function ChatTab({ project, input, onInputChange, activeWorkspaces, onToggleWorkspace }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -304,6 +306,22 @@ export function ChatTab({ project, input, onInputChange }: Props) {
   const [entries, setEntries] = useState<ChatEntry[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [elapsed, setElapsed] = useState(0);
+
+  // Fetch workspace packages for the workspace selector
+  const [workspacePackages, setWorkspacePackages] = useState<{ name: string; path: string; category: string }[]>([]);
+  useEffect(() => {
+    fetch(`/api/projects/${project.id}/workspaces`)
+      .then((r) => r.json())
+      .then((data) => {
+        console.log("[chat] workspaces:", data?.packages?.length ?? 0);
+        if (data.packages?.length) {
+          setWorkspacePackages(data.packages.map((p: any) => ({ name: p.name, path: p.path, category: p.category })));
+        } else {
+          setWorkspacePackages([]);
+        }
+      })
+      .catch((err) => { console.log("[chat] workspaces error:", err); setWorkspacePackages([]); });
+  }, [project.id]);
 
   // Token usage tracking
   const [tokenStats, setTokenStats] = useState({
@@ -646,8 +664,15 @@ export function ChatTab({ project, input, onInputChange }: Props) {
     const currentBlocks = [...pastedBlocks];
     const pastedContent = currentBlocks.map((b) => b.content).join("\n\n");
     const typedText = input.trim();
-    const fullMessage = [typedText, pastedContent].filter(Boolean).join("\n\n");
-    if (!fullMessage || !wsRef.current) return;
+    const rawMessage = [typedText, pastedContent].filter(Boolean).join("\n\n");
+    if (!rawMessage || !wsRef.current) return;
+
+    // Inject workspace scope if workspaces are selected
+    let fullMessage = rawMessage;
+    if (activeWorkspaces.length > 0) {
+      const scope = activeWorkspaces.join(", ");
+      fullMessage = `[Scope: focus on ${scope} in this monorepo]\n\n${rawMessage}`;
+    }
 
     setSlashDismissed(true);
     onInputChange("");
@@ -911,6 +936,35 @@ export function ChatTab({ project, input, onInputChange }: Props) {
             <ArrowDown className="h-3 w-3" />
             Dernier message
           </Button>
+        </div>
+      )}
+
+      {/* Workspace scope selector */}
+      {workspacePackages.length > 0 && (
+        <div className="flex items-center gap-1.5 border-t border-border px-5 py-1.5 overflow-x-auto scrollbar-visible">
+          <span className="text-[10px] text-muted-foreground shrink-0 mr-1">Scope:</span>
+          {workspacePackages.map((pkg) => (
+            <button
+              key={pkg.path}
+              onClick={() => onToggleWorkspace(pkg.path)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-mono transition-colors shrink-0",
+                activeWorkspaces.includes(pkg.path)
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {pkg.name}
+            </button>
+          ))}
+          {activeWorkspaces.length > 0 && (
+            <button
+              onClick={() => activeWorkspaces.forEach((p) => onToggleWorkspace(p))}
+              className="text-[10px] text-muted-foreground hover:text-foreground ml-1 shrink-0"
+            >
+              reset
+            </button>
+          )}
         </div>
       )}
 

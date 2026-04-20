@@ -20,10 +20,20 @@ export function App() {
   const { data: projects, refetch } = useApi<Project[]>("/projects");
   const [selected, setSelected] = useState<Project | null>(null);
   const [tab, setTab] = useState(() => localStorage.getItem("overlord:tab") ?? "chat");
-  const [chatInputs, setChatInputs] = useState<Record<number, string>>({});
+  const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("overlord:chatInputs") ?? "{}");
+    } catch { return {}; }
+  });
   const [restored, setRestored] = useState(false);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatusMap>({});
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
+  // Active workspaces per project (for monorepo scope)
+  const [activeWorkspaces, setActiveWorkspaces] = useState<Record<number, string[]>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("overlord:workspaces") ?? "{}");
+    } catch { return {}; }
+  });
   const statusWsRef = useRef<WebSocket | null>(null);
 
   // Restore selected project from localStorage when projects load
@@ -54,6 +64,26 @@ export function App() {
   useEffect(() => {
     localStorage.setItem("overlord:tab", tab);
   }, [tab]);
+
+  // Persist chat inputs (survives PC lock / tab sleep)
+  useEffect(() => {
+    localStorage.setItem("overlord:chatInputs", JSON.stringify(chatInputs));
+  }, [chatInputs]);
+
+  // Persist workspaces
+  useEffect(() => {
+    localStorage.setItem("overlord:workspaces", JSON.stringify(activeWorkspaces));
+  }, [activeWorkspaces]);
+
+  const handleToggleWorkspace = useCallback((projectId: number, path: string) => {
+    setActiveWorkspaces((prev) => {
+      const current = prev[projectId] ?? [];
+      const next = current.includes(path)
+        ? current.filter((p) => p !== path)
+        : [...current, path];
+      return { ...prev, [projectId]: next };
+    });
+  }, []);
 
   // Fetch initial agent statuses + listen for changes via WS
   useEffect(() => {
@@ -190,6 +220,8 @@ export function App() {
                     onInputChange={(v) =>
                       setChatInputs((prev) => ({ ...prev, [selected.id]: v }))
                     }
+                    activeWorkspaces={activeWorkspaces[selected.id] ?? []}
+                    onToggleWorkspace={(path) => handleToggleWorkspace(selected.id, path)}
                   />
                 )}
               </div>
