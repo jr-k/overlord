@@ -4,7 +4,10 @@ import { useApi, post } from "./hooks/useApi.js";
 import { ProjectSidebar } from "./components/Sidebar.js";
 import { SummaryTab } from "./components/SummaryTab.js";
 import { ChatTab } from "./components/ChatTab.js";
-import { TimelineTab } from "./components/TimelineTab.js";
+import { SettingsTab } from "./components/SettingsTab.js";
+import { MarketingTab } from "./components/MarketingTab.js";
+import { SkillsTab } from "./components/SkillsTab.js";
+import { OpenInEditorButton } from "./components/OpenInEditorButton.js";
 import { TodosTab } from "./components/TodosTab.js";
 import { TerminalTab } from "./components/TerminalTab.js";
 import { WorkspacesTab } from "./components/WorkspacesTab.js";
@@ -23,6 +26,11 @@ export function App() {
   const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem("overlord:chatInputs") ?? "{}");
+    } catch { return {}; }
+  });
+  const [marketingInputs, setMarketingInputs] = useState<Record<number, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("overlord:marketingInputs") ?? "{}");
     } catch { return {}; }
   });
   const [restored, setRestored] = useState(false);
@@ -65,10 +73,20 @@ export function App() {
     localStorage.setItem("overlord:tab", tab);
   }, [tab]);
 
-  // Persist chat inputs (survives PC lock / tab sleep)
+  // Persist chat inputs (debounced to not lag the input during typing)
   useEffect(() => {
-    localStorage.setItem("overlord:chatInputs", JSON.stringify(chatInputs));
+    const t = setTimeout(() => {
+      localStorage.setItem("overlord:chatInputs", JSON.stringify(chatInputs));
+    }, 500);
+    return () => clearTimeout(t);
   }, [chatInputs]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      localStorage.setItem("overlord:marketingInputs", JSON.stringify(marketingInputs));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [marketingInputs]);
 
   // Persist workspaces
   useEffect(() => {
@@ -135,6 +153,22 @@ export function App() {
     [selected]
   );
 
+  // Stable callbacks for the chat/marketing inputs — keyed by current project
+  const handleChatInputChange = useCallback(
+    (v: string) => {
+      if (!selected) return;
+      setChatInputs((prev) => ({ ...prev, [selected.id]: v }));
+    },
+    [selected]
+  );
+  const handleMarketingInputChange = useCallback(
+    (v: string) => {
+      if (!selected) return;
+      setMarketingInputs((prev) => ({ ...prev, [selected.id]: v }));
+    },
+    [selected]
+  );
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -170,15 +204,18 @@ export function App() {
                       <TooltipContent className="text-xs">{remoteUrl}</TooltipContent>
                     </Tooltip>
                   )}
+                  <OpenInEditorButton path={selected.path} />
                 </h2>
                 <Tabs value={tab} onValueChange={setTab}>
                   <TabsList>
                     <TabsTrigger value="chat">Chat</TabsTrigger>
                     <TabsTrigger value="todos">Todos</TabsTrigger>
+                    <TabsTrigger value="marketing">Marketing</TabsTrigger>
+                    <TabsTrigger value="skills">Skills</TabsTrigger>
                     <TabsTrigger value="workspaces">Workspaces</TabsTrigger>
                     <TabsTrigger value="summary">Resume</TabsTrigger>
                     <TabsTrigger value="terminal">Terminal</TabsTrigger>
-                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                    <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </header>
@@ -189,9 +226,24 @@ export function App() {
                     <SummaryTab project={selected} />
                   </div>
                 )}
-                {tab === "timeline" && (
+                {tab === "settings" && (
                   <div className="h-full overflow-auto">
-                    <TimelineTab project={selected} />
+                    <SettingsTab key={selected.id} project={selected} />
+                  </div>
+                )}
+                {tab === "marketing" && (
+                  <div className="h-full">
+                    <MarketingTab
+                      key={selected.id}
+                      project={selected}
+                      input={marketingInputs[selected.id] ?? ""}
+                      onInputChange={handleMarketingInputChange}
+                    />
+                  </div>
+                )}
+                {tab === "skills" && (
+                  <div className="h-full overflow-auto">
+                    <SkillsTab key={selected.id} project={selected} />
                   </div>
                 )}
                 {tab === "todos" && (
@@ -217,9 +269,7 @@ export function App() {
                     key={selected.id}
                     project={selected}
                     input={chatInputs[selected.id] ?? ""}
-                    onInputChange={(v) =>
-                      setChatInputs((prev) => ({ ...prev, [selected.id]: v }))
-                    }
+                    onInputChange={handleChatInputChange}
                     activeWorkspaces={activeWorkspaces[selected.id] ?? []}
                     onToggleWorkspace={(path) => handleToggleWorkspace(selected.id, path)}
                   />

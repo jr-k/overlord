@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -39,7 +39,7 @@ function CodeBlock({ children, className: langClass, ...props }: any) {
   );
 }
 
-export function MarkdownContent({ content, className }: Props) {
+export const MarkdownContent = React.memo(function MarkdownContent({ content, className }: Props) {
   return (
     <div
       className={cn(
@@ -84,4 +84,4 @@ export function MarkdownContent({ content, className }: Props) {
       </ReactMarkdown>
     </div>
   );
-}
+});

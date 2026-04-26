@@ -1,0 +1,222 @@
+import { spawn } from "child_process";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { db } from "../db/index.js";
+import { conversations, messages, projects } from "../db/schema.js";
+import { eq } from "drizzle-orm";
+import { createGitSnapshot } from "./git-snapshot.js";
+import { broadcast, saveEvents, saveEventsNow } from "./sessions.js";
+import { broadcastAll } from "../ws.js";
+import { buildMarketingSystemPrompt } from "./marketing-prompt.js";
+import { generateSummary } from "./summary.js";
+import { generateLearnings } from "./learnings.js";
+import { isIndexed as isCodegraphIndexed, runCodegraph, CODEGRAPH_BIN } from "../routes/codegraph.js";
+import type { AgentSession } from "./types.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const PORT = Number(process.env.PORT) || 4747;
+
+export function sendMessage(session: AgentSession, message: string) {
+  if (session.currentProcess) {
+    console.log(`[agent:${session.projectId}] already running, queuing not implemented`);
+    return;
+  }
+
+  const snapshotSha = createGitSnapshot(session.projectPath);
+  console.log(`[agent:${session.projectId}] snapshot: ${snapshotSha ?? "none"}`);
+
+  const eventIndex = session.events.length;
+  session.events.push({ type: "user_message", content: message, snapshotSha });
+  saveEvents(session);
+  db.insert(messages)
+    .values({ conversationId: session.conversationId, role: "user", content: message })
+    .run();
+
+  broadcast(session, { type: "agent:snapshot", snapshotSha, eventIndex, message });
+
+  const tsxBin = resolve(__dirname, "..", "..", "node_modules", ".bin", "tsx");
+  const mcpServers: Record<string, any> = {
+    overlord: {
+      command: tsxBin,
+      args: [resolve(__dirname, "..", "mcp.ts")],
+      env: { OVERLORD_PORT: String(PORT) },
+    },
+  };
+
+  if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
+    mcpServers.codegraph = {
+      command: CODEGRAPH_BIN,
+      args: ["serve", "--mcp", session.projectPath],
+    };
+  }
+
+  const mcpConfig = JSON.stringify({ mcpServers });
+
+  const project = db.select().from(projects).where(eq(projects.id, session.projectId)).get();
+
+  const defaultChatPrompt = "Match the language of the user's message in your response. When you respond in French, always use proper accents (é, è, ê, à, â, ù, û, ç, ô, etc.) — never write French without accents.";
+
+  const marketingPrompt = buildMarketingSystemPrompt(project);
+
+  const systemPrompt = session.channel === "marketing"
+    ? marketingPrompt
+    : (project?.systemPrompt || defaultChatPrompt);
+
+  const model = project?.model;
+
+  const defaultTools = [
+    "Edit", "Write", "Read", "Bash", "Glob", "Grep", "NotebookEdit",
+    "WebFetch", "WebSearch", "ToolSearch", "Agent",
+    "mcp__overlord__overlord_list_todos", "mcp__overlord__overlord_add_todo",
+    "mcp__overlord__overlord_complete_todo", "mcp__overlord__overlord_delete_todo",
+    "mcp__overlord__overlord_list_projects", "mcp__overlord__overlord_get_project",
+    "mcp__overlord__overlord_ask_project",
+  ];
+  let allowedTools = defaultTools;
+  if (project?.allowedTools) {
+    try { allowedTools = JSON.parse(project.allowedTools); } catch {}
+  }
+
+  if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
+    allowedTools = [
+      ...allowedTools,
+      "mcp__codegraph__codegraph_search",
+      "mcp__codegraph__codegraph_context",
+      "mcp__codegraph__codegraph_callers",
+      "mcp__codegraph__codegraph_files",
+      "mcp__codegraph__codegraph_status",
+      "mcp__codegraph__codegraph_query",
+    ];
+  }
+
+  const args = [
+    "--print",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--append-system-prompt", systemPrompt,
+    "--mcp-config", mcpConfig,
+    "--allowedTools", ...allowedTools,
+  ];
+
+  if (model) {
+    args.push("--model", model);
+  }
+
+  if (session.claudeSessionId) {
+    args.push("--resume", session.claudeSessionId);
+  }
+
+  args.push("--", message);
+
+  console.log(`[agent:${session.projectId}] spawning: claude ${args.join(" ").slice(0, 100)}...`);
+
+  const proc = spawn(CLAUDE_PATH, args, {
+    cwd: session.projectPath,
+    env: { ...process.env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  console.log(`[agent:${session.projectId}] pid=${proc.pid}`);
+
+  session.currentProcess = proc;
+  session.status = "running";
+  broadcast(session, { type: "agent:running" });
+  broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "running" });
+
+  let buffer = "";
+  proc.stdout!.on("data", (data: Buffer) => {
+    resetActivityTimer();
+    buffer += data.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        session.events.push(event);
+
+        if (event.type === "system" && event.subtype === "init" && event.session_id) {
+          session.claudeSessionId = event.session_id;
+          console.log(`[agent:${session.projectId}] session_id=${event.session_id}`);
+        }
+
+        console.log(`[agent:${session.projectId}] ${event.type}${event.subtype ? `:${event.subtype}` : ""}`);
+        broadcast(session, { type: "agent:event", event, eventIndex: session.events.length });
+        saveEvents(session);
+      } catch {
+        broadcast(session, { type: "agent:raw", data: line });
+      }
+    }
+  });
+
+  let staleSessionDetected = false;
+  proc.stderr!.on("data", (data: Buffer) => {
+    resetActivityTimer();
+    const text = data.toString();
+    console.log(`[agent:${session.projectId}] stderr: ${text.slice(0, 500)}`);
+    if (text.includes("No conversation found with session ID")) {
+      console.log(`[agent:${session.projectId}] stale session, clearing claudeSessionId`);
+      staleSessionDetected = true;
+      session.claudeSessionId = null;
+    }
+  });
+
+  let activityTimer = setTimeout(() => {
+    console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+    proc.kill("SIGTERM");
+  }, 5 * 60 * 1000);
+
+  const resetActivityTimer = () => {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+      proc.kill("SIGTERM");
+    }, 5 * 60 * 1000);
+  };
+
+  proc.on("error", (err) => {
+    clearTimeout(activityTimer);
+    console.log(`[agent:${session.projectId}] process error: ${err.message}`);
+    session.currentProcess = null;
+    session.status = "idle";
+    broadcast(session, { type: "agent:done", code: 1 });
+    broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "error" });
+  });
+
+  proc.on("close", (code) => {
+    clearTimeout(activityTimer);
+    console.log(`[agent:${session.projectId}] done code=${code}`);
+    session.currentProcess = null;
+    session.status = "idle";
+    saveEventsNow(session);
+
+    if (staleSessionDetected && code !== 0) {
+      console.log(`[agent:${session.projectId}] retrying without --resume`);
+      setTimeout(() => sendMessage(session, message), 100);
+      return;
+    }
+
+    broadcast(session, { type: "agent:done", code });
+    const finalStatus = code === 0 ? "done" : "error";
+    broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: finalStatus });
+
+    if (code === 0) {
+      generateSummary(session);
+      if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
+        runCodegraph(["sync", session.projectPath], session.projectPath, 60000).catch(() => {});
+      }
+      if (session.channel === "chat") {
+        const toolUseCount = session.events.filter(
+          (e: any) => e.type === "stream_event" && e.event?.type === "content_block_start" && e.event?.content_block?.type === "tool_use"
+        ).length;
+        const assistantMessages = session.events.filter((e: any) => e.type === "assistant").length;
+        if (toolUseCount >= 3 || assistantMessages >= 3) {
+          generateLearnings(session);
+        }
+      }
+    }
+  });
+}

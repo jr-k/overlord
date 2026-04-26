@@ -20,10 +20,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { patch } from "../hooks/useApi.js";
+import { Input } from "@/components/ui/input";
+import { patch, post } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 import type { AgentStatusMap } from "../App.js";
-import { Star, EyeOff, Eye } from "lucide-react";
+import { Star, EyeOff, Eye, Plus, FolderPlus, Check, X } from "lucide-react";
 
 const AGENT_STATUS_STYLES: Record<string, string> = {
   none:    "bg-zinc-500/50",
@@ -52,6 +53,24 @@ export function ProjectSidebar({
 }: Props) {
   const [search, setSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const handleCreateProject = useCallback(async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+    setCreateError(null);
+    const result = await post<Project & { error?: string }>("/projects/create", { name, initGit: true });
+    if (result.error) {
+      setCreateError(result.error);
+      return;
+    }
+    setNewProjectName("");
+    setCreating(false);
+    onProjectUpdate();
+    if (result.id) onSelect(result);
+  }, [newProjectName, onProjectUpdate, onSelect]);
 
   const filtered = useMemo(() => {
     let list = projects;
@@ -194,6 +213,54 @@ export function ProjectSidebar({
       </SidebarContent>
 
       <SidebarFooter className="gap-2">
+        {/* New project inline form */}
+        {creating ? (
+          <div className="flex flex-col gap-1.5">
+            <Input
+              autoFocus
+              placeholder="my-new-project"
+              value={newProjectName}
+              onChange={(e) => { setNewProjectName(e.target.value); setCreateError(null); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateProject();
+                if (e.key === "Escape") { setCreating(false); setNewProjectName(""); setCreateError(null); }
+              }}
+              className="h-7 text-xs"
+            />
+            {createError && (
+              <p className="text-[10px] text-destructive">{createError}</p>
+            )}
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                className="flex-1 h-6 text-[11px]"
+                onClick={handleCreateProject}
+                disabled={!newProjectName.trim()}
+              >
+                <Check className="h-3 w-3 mr-1" /> Create
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => { setCreating(false); setNewProjectName(""); setCreateError(null); }}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-xs"
+            onClick={() => setCreating(true)}
+          >
+            <FolderPlus className="mr-2 h-3 w-3" />
+            Nouveau projet
+          </Button>
+        )}
+
         <Button
           variant="ghost"
           size="sm"
@@ -208,9 +275,9 @@ export function ProjectSidebar({
           {showHidden ? "Masquer les caches" : "Afficher les caches"}
         </Button>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="w-full text-xs"
+          className="w-full text-xs text-muted-foreground"
           onClick={onScan}
         >
           Scanner les projets

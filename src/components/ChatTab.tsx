@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -6,9 +6,11 @@ import { Square, Copy, Check, ArrowDown, Undo2, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolUseCard } from "./ToolUseCard.js";
+import { RichPasteInput, type RichPasteInputHandle } from "./RichPasteInput.js";
 import type { Project } from "../types.js";
 
 type AgentStatus = "idle" | "waiting" | "running";
+type LearningsStatus = "idle" | "generating";
 
 interface PastedBlock {
   id: string;
@@ -35,10 +37,12 @@ interface Props {
   onInputChange: (value: string) => void;
   activeWorkspaces: string[];
   onToggleWorkspace: (path: string) => void;
+  channel?: "chat" | "marketing";
 }
 
 // Extract readable chat entries from Claude stream-json events
-function extractFromEvents(events: any[]): ChatEntry[] {
+// `indexOffset` is the absolute position in the full events array (for pagination).
+function extractFromEvents(events: any[], indexOffset = 0): ChatEntry[] {
   const entries: ChatEntry[] = [];
   let pendingText = "";
 
@@ -58,7 +62,7 @@ function extractFromEvents(events: any[]): ChatEntry[] {
         role: "user",
         content: ev.content,
         snapshotSha: ev.snapshotSha ?? undefined,
-        eventIndex: i,
+        eventIndex: indexOffset + i,
       });
     } else if (ev.type === "assistant") {
       const blocks = ev.message?.content ?? [];
@@ -95,6 +99,34 @@ function extractFromEvents(events: any[]): ChatEntry[] {
 
   flushText();
   return entries;
+}
+
+function InlineDisplay({ content, blocks }: { content: string; blocks: PastedBlock[] }) {
+  const blocksById = new Map(blocks.map((b) => [b.id, b]));
+  const parts: (string | PastedBlock)[] = [];
+  let lastIndex = 0;
+  const regex = /\{\{paste:([^}]+)\}\}/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
+    const block = blocksById.get(match[1]);
+    if (block) parts.push(block);
+    else parts.push(match[0]); // keep placeholder as-is if block missing
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+
+  return (
+    <div className="whitespace-pre-wrap">
+      {parts.map((p, i) =>
+        typeof p === "string" ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <PastedBadge key={i} block={p} />
+        )
+      )}
+    </div>
+  );
 }
 
 function PastedBadge({ block }: { block: PastedBlock }) {
@@ -154,7 +186,7 @@ function AddToTodoButton({ content, projectId }: { content: string; projectId: n
   );
 }
 
-function UserMessage({
+const UserMessage = React.memo(function UserMessage({
   entry,
   projectId,
   onRollback,
@@ -233,29 +265,24 @@ function UserMessage({
           Toi
         </div>
         <div className="text-sm leading-relaxed select-text">
-          {/* Show typed text */}
-          {entry.displayContent && (
-            <div className="whitespace-pre-wrap">{entry.displayContent}</div>
-          )}
-          {/* Show pasted blocks as badges */}
-          {entry.pastedBlocks && entry.pastedBlocks.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {entry.displayContent ? (
+            <InlineDisplay content={entry.displayContent} blocks={entry.pastedBlocks ?? []} />
+          ) : entry.pastedBlocks && entry.pastedBlocks.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
               {entry.pastedBlocks.map((block) => (
                 <PastedBadge key={block.id} block={block} />
               ))}
             </div>
-          )}
-          {/* Fallback: no display info, show raw content */}
-          {!entry.displayContent && !entry.pastedBlocks && (
+          ) : (
             <div className="whitespace-pre-wrap">{entry.content}</div>
           )}
         </div>
       </div>
     </div>
   );
-}
+});
 
-function MessageBubble({ content, projectId }: { content: string; projectId: number }) {
+const MessageBubble = React.memo(function MessageBubble({ content, projectId }: { content: string; projectId: number }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -295,17 +322,64 @@ function MessageBubble({ content, projectId }: { content: string; projectId: num
       </div>
     </div>
   );
-}
+});
 
-export function ChatTab({ project, input, onInputChange, activeWorkspaces, onToggleWorkspace }: Props) {
+export function ChatTab({ project, input, onInputChange, activeWorkspaces, onToggleWorkspace, channel = "chat" }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<RichPasteInputHandle>(null);
   const [connected, setConnected] = useState(false);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [learningsStatus, setLearningsStatus] = useState<LearningsStatus>("idle");
   const [entries, setEntries] = useState<ChatEntry[]>([]);
+  const [firstLoadedIndex, setFirstLoadedIndex] = useState(0);
+  const [totalEvents, setTotalEvents] = useState(0);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [elapsed, setElapsed] = useState(0);
+
+  // Model settings (fetched from project)
+  const [model, setModel] = useState<string>("");
+  useEffect(() => {
+    fetch(`/api/projects/${project.id}`)
+      .then((r) => r.json())
+      .then((data) => setModel(data.model ?? ""))
+      .catch(() => {});
+  }, [project.id]);
+
+  const handleModelChange = useCallback(async (newModel: string) => {
+    setModel(newModel);
+    await fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: newModel || null }),
+    });
+  }, [project.id]);
+
+  // Codegraph status (chat channel only)
+  const [codegraphStatus, setCodegraphStatus] = useState<{ indexed: boolean; indexing: boolean }>({ indexed: false, indexing: false });
+  const fetchCodegraphStatus = useCallback(() => {
+    if (channel !== "chat") return;
+    fetch(`/api/codegraph/${project.id}/status`)
+      .then((r) => r.json())
+      .then((data) => setCodegraphStatus({ indexed: !!data.indexed, indexing: !!data.indexing }))
+      .catch(() => {});
+  }, [project.id, channel]);
+
+  useEffect(() => {
+    fetchCodegraphStatus();
+    // Poll while indexing
+    const interval = setInterval(() => {
+      if (codegraphStatus.indexing) fetchCodegraphStatus();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fetchCodegraphStatus, codegraphStatus.indexing]);
+
+  const handleIndexCodegraph = useCallback(async () => {
+    setCodegraphStatus((s) => ({ ...s, indexing: true }));
+    await fetch(`/api/codegraph/${project.id}/init`, { method: "POST" });
+    fetchCodegraphStatus();
+  }, [project.id, fetchCodegraphStatus]);
 
   // Fetch workspace packages for the workspace selector
   const [workspacePackages, setWorkspacePackages] = useState<{ name: string; path: string; category: string }[]>([]);
@@ -414,13 +488,16 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     }
   }, [entries, streamingText]);
 
-  // Detect user scroll position
+  const loadOlderRef = useRef<() => void>(() => {});
+
+  // Detect user scroll position + auto-load older when near top
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 80;
     userScrolledUp.current = !atBottom;
     setShowScrollBtn(!atBottom);
+    if (scrollTop < 200) loadOlderRef.current();
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -429,6 +506,24 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     userScrolledUp.current = false;
     setShowScrollBtn(false);
   }, []);
+
+  const loadOlder = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (firstLoadedIndex <= 0 || loadingOlder) return;
+    setLoadingOlder(true);
+    ws.send(JSON.stringify({
+      type: "loadOlder",
+      projectId: project.id,
+      channel,
+      beforeIndex: firstLoadedIndex,
+      limit: 500,
+    }));
+  }, [firstLoadedIndex, loadingOlder, project.id, channel]);
+
+  useEffect(() => {
+    loadOlderRef.current = loadOlder;
+  }, [loadOlder]);
 
   // WebSocket
   useEffect(() => {
@@ -443,6 +538,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           type: "subscribe",
           projectId: project.id,
           projectPath: project.path,
+          channel,
         })
       );
     };
@@ -456,8 +552,11 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       const msg = JSON.parse(e.data);
 
       if (msg.type === "agent:history") {
-        const parsed = extractFromEvents(msg.events).slice(-50);
+        const offset = msg.firstLoadedIndex ?? 0;
+        const parsed = extractFromEvents(msg.events, offset);
         setEntries(parsed);
+        setFirstLoadedIndex(offset);
+        setTotalEvents(msg.totalEvents ?? msg.eventCount ?? msg.events.length);
         setStreamingText("");
         lastEventIndexRef.current = msg.eventCount ?? msg.events.length;
 
@@ -480,6 +579,22 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
         if (msg.status === "running") setAgentStatus("running");
         else setAgentStatus("idle");
+      } else if (msg.type === "agent:older") {
+        const offset = msg.firstLoadedIndex ?? 0;
+        const olderEntries = extractFromEvents(msg.events, offset);
+        const scrollEl = scrollRef.current;
+        const prevScrollHeight = scrollEl?.scrollHeight ?? 0;
+        const prevScrollTop = scrollEl?.scrollTop ?? 0;
+        setEntries((prev) => [...olderEntries, ...prev]);
+        setFirstLoadedIndex(offset);
+        setLoadingOlder(false);
+        // Preserve scroll position so the user stays at the same content
+        requestAnimationFrame(() => {
+          if (scrollEl) {
+            const delta = scrollEl.scrollHeight - prevScrollHeight;
+            scrollEl.scrollTop = prevScrollTop + delta;
+          }
+        });
       } else if (msg.type === "agent:ready") {
         setAgentStatus("idle");
       } else if (msg.type === "agent:start") {
@@ -503,6 +618,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         // Skip events already included in the history replay
         if (msg.eventIndex && msg.eventIndex <= lastEventIndexRef.current) return;
         lastEventIndexRef.current = msg.eventIndex ?? lastEventIndexRef.current;
+        if (typeof msg.eventIndex === "number") setTotalEvents(msg.eventIndex);
 
         const ev = msg.event;
 
@@ -564,6 +680,12 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               },
             ]);
             setAgentStatus("running");
+
+            // If agent called AskUserQuestion, pause it: kill the process and wait for user
+            if (tool.name === "AskUserQuestion" && toolInput?.questions?.length > 0) {
+              console.log("[chat] AskUserQuestion detected, pausing agent");
+              wsRef.current?.send(JSON.stringify({ type: "stop", projectId: project.id, channel }));
+            }
           }
         } else if (ev.type === "assistant") {
           // Complete assistant message — might contain tool_result
@@ -645,6 +767,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                   projectId: project.id,
                   projectPath: project.path,
                   message: next,
+                  channel,
                 })
               );
             }, 500);
@@ -653,18 +776,35 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           setAgentStatus("idle");
           return queue;
         });
+      } else if (msg.type === "learnings:generating" && msg.projectId === project.id) {
+        setLearningsStatus("generating");
+      } else if (msg.type === "learnings:done" && msg.projectId === project.id) {
+        setLearningsStatus("idle");
       }
     };
 
     return () => ws.close();
-  }, [project.id, project.path]);
+  }, [project.id, project.path, channel]);
 
   const handleSend = useCallback(() => {
-    // Build full message: typed text + pasted blocks
     const currentBlocks = [...pastedBlocks];
-    const pastedContent = currentBlocks.map((b) => b.content).join("\n\n");
-    const typedText = input.trim();
-    const rawMessage = [typedText, pastedContent].filter(Boolean).join("\n\n");
+    const typedText = input;
+
+    // Replace {{paste:id}} placeholders with actual content at their position
+    const blocksById = new Map(currentBlocks.map((b) => [b.id, b]));
+    let rawMessage = typedText.replace(/\{\{paste:([^}]+)\}\}/g, (_, id) => {
+      const block = blocksById.get(id);
+      return block ? `\n${block.content}\n` : "";
+    }).trim();
+
+    // If there are leftover blocks never referenced (shouldn't happen normally), append them
+    const usedIds = new Set<string>();
+    typedText.replace(/\{\{paste:([^}]+)\}\}/g, (_, id) => { usedIds.add(id); return ""; });
+    const unusedBlocks = currentBlocks.filter((b) => !usedIds.has(b.id));
+    if (unusedBlocks.length > 0) {
+      rawMessage = [rawMessage, ...unusedBlocks.map((b) => b.content)].filter(Boolean).join("\n\n");
+    }
+
     if (!rawMessage || !wsRef.current) return;
 
     // Inject workspace scope if workspaces are selected
@@ -696,7 +836,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         id: crypto.randomUUID(),
         role: "user",
         content: fullMessage,
-        displayContent: typedText || undefined,
+        displayContent: typedText.trim() || undefined,
         pastedBlocks: currentBlocks.length > 0 ? currentBlocks : undefined,
       },
     ]);
@@ -707,16 +847,42 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         projectId: project.id,
         projectPath: project.path,
         message: fullMessage,
+        channel,
       })
     );
-  }, [input, pastedBlocks, project, onInputChange, agentStatus]);
+  }, [input, pastedBlocks, project, onInputChange, agentStatus, channel, activeWorkspaces]);
+
+  const handleAnswerQuestions = useCallback((answer: string) => {
+    if (!wsRef.current) return;
+
+    setAgentStatus("waiting");
+    setEntries((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", content: answer },
+    ]);
+
+    if (agentStatus !== "idle") {
+      setMessageQueue((prev) => [...prev, answer]);
+      return;
+    }
+
+    wsRef.current.send(
+      JSON.stringify({
+        type: "chat",
+        projectId: project.id,
+        projectPath: project.path,
+        message: answer,
+        channel,
+      })
+    );
+  }, [project, agentStatus, channel]);
 
   const handleStop = useCallback(() => {
     if (!wsRef.current) return;
     wsRef.current.send(
-      JSON.stringify({ type: "stop", projectId: project.id })
+      JSON.stringify({ type: "stop", projectId: project.id, channel })
     );
-  }, [project.id]);
+  }, [project.id, channel]);
 
   const selectSlashCommand = useCallback(
     (cmd: string) => {
@@ -771,43 +937,63 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
-        <span className="font-mono text-sm text-primary">
-          claude @ {project.name}
-        </span>
-        <div className="flex items-center gap-3">
-          {isWorking && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-6 gap-1.5 px-2 text-[11px]"
-              onClick={handleStop}
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-mono text-sm text-primary">
+            claude @ {project.name}
+          </span>
+          {learningsStatus === "generating" && (
+            <Badge
+              variant="outline"
+              className="gap-1.5 text-[10px] border-purple-400/40 text-purple-400 animate-pulse"
+              title="L'agent analyse cette session pour en tirer des apprentissages"
             >
-              <Square className="h-3 w-3" />
-              Stop
-            </Button>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-purple-400" />
+              Analyse de la session...
+            </Badge>
           )}
-          {agentStatus !== "idle" && (
+          {channel === "chat" && (
             <Badge
               variant="outline"
               className={cn(
-                "gap-1.5 text-[11px]",
-                agentStatus === "waiting" &&
-                  "animate-pulse border-yellow-400/40 text-yellow-400",
-                agentStatus === "running" &&
-                  "animate-pulse border-green-400/40 text-green-400"
+                "gap-1.5 text-[10px]",
+                codegraphStatus.indexing && "border-amber-400/40 text-amber-400 animate-pulse",
+                !codegraphStatus.indexing && codegraphStatus.indexed && "border-emerald-400/40 text-emerald-400",
+                !codegraphStatus.indexing && !codegraphStatus.indexed && "border-zinc-400/40 text-zinc-400"
               )}
+              title={
+                codegraphStatus.indexing
+                  ? "CodeGraph est en train d'indexer le projet"
+                  : codegraphStatus.indexed
+                    ? "CodeGraph indexed — Claude utilise un index sémantique pour explorer le code"
+                    : "CodeGraph non indexé — clique sur 'Indexer' pour activer"
+              }
             >
-              <span
-                className={cn(
-                  "inline-block h-1.5 w-1.5 rounded-full",
-                  agentStatus === "waiting" && "bg-yellow-400",
-                  agentStatus === "running" && "bg-green-400"
-                )}
-              />
-              {agentStatus === "waiting" && `Demarrage ${formatElapsed(elapsed)}`}
-              {agentStatus === "running" && `En cours ${formatElapsed(elapsed)}`}
+              <span className={cn(
+                "inline-block h-1.5 w-1.5 rounded-full",
+                codegraphStatus.indexing && "bg-amber-400",
+                !codegraphStatus.indexing && codegraphStatus.indexed && "bg-emerald-400",
+                !codegraphStatus.indexing && !codegraphStatus.indexed && "bg-zinc-400"
+              )} />
+              {codegraphStatus.indexing ? "Indexation..." : codegraphStatus.indexed ? "Indexed" : "Not indexed"}
             </Badge>
           )}
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={model}
+            onChange={(e) => handleModelChange(e.target.value)}
+            className="hidden md:block rounded border border-border bg-secondary px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer font-mono"
+            title="Claude model for this project"
+            disabled={isWorking}
+          >
+            <option value="">Default</option>
+            <option value="claude-opus-4-7">Opus 4.7</option>
+            <option value="claude-opus-4-6[1m]">Opus 4.6 (1M)</option>
+            <option value="claude-opus-4-6">Opus 4.6</option>
+            <option value="claude-sonnet-4-6[1m]">Sonnet 4.6 (1M)</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          </select>
           {tokenStats.turns > 0 && (
             <Tooltip>
               <TooltipTrigger>
@@ -873,6 +1059,19 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="relative flex-1 min-h-0 overflow-y-auto p-4 space-y-3 scrollbar-visible select-text">
+        {firstLoadedIndex > 0 && (
+          <div className="flex justify-center pt-1 pb-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadOlder}
+              disabled={loadingOlder}
+              className="text-xs text-muted-foreground"
+            >
+              {loadingOlder ? "Chargement..." : `Charger les messages precedents (${firstLoadedIndex} restants)`}
+            </Button>
+          </div>
+        )}
         {entries.length === 0 && !streamingText && agentStatus === "idle" && (
           <p className="text-center text-sm text-muted-foreground py-12">
             Demarrer une conversation avec Claude sur{" "}
@@ -891,6 +1090,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               name={entry.toolName ?? entry.content}
               input={entry.toolInput}
               result={entry.toolResult}
+              onAnswerQuestions={handleAnswerQuestions}
             />
           ) : entry.role === "user" ? (
             <UserMessage
@@ -920,6 +1120,23 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               <MarkdownContent content={streamingText} />
             </div>
             <span className="inline-block h-4 w-0.5 animate-pulse bg-primary ml-0.5" />
+          </div>
+        )}
+
+        {/* Typing indicator when agent is working but no text yet */}
+        {isWorking && !streamingText && (
+          <div className="max-w-[90%] rounded-lg border border-border bg-card px-4 py-3">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
+              Claude
+            </div>
+            <div className="flex items-center gap-1 py-1">
+              <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
+              <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
+              <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
+              <span className="ml-2 text-[11px] text-muted-foreground">
+                {agentStatus === "waiting" ? `Démarrage... ${formatElapsed(elapsed)}` : `${formatElapsed(elapsed)}`}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -992,6 +1209,26 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           </div>
         )}
 
+        {/* CodeGraph index suggestion */}
+        {channel === "chat" && !codegraphStatus.indexed && !codegraphStatus.indexing && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-xs">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-emerald-400 font-medium">Activer CodeGraph</span>
+              <span className="text-muted-foreground text-[10px]">
+                Index sémantique du code, -94% de tool calls pour Claude
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs gap-1.5 shrink-0"
+              onClick={handleIndexCodegraph}
+            >
+              Indexer
+            </Button>
+          </div>
+        )}
+
         {/* Queued messages indicator */}
         {messageQueue.length > 0 && (
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -1012,64 +1249,38 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           className="flex items-stretch gap-2"
           style={{ minHeight: "12vh", maxHeight: "20vh" }}
         >
-          <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-            {/* Pasted blocks badges */}
-            {pastedBlocks.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-1">
-                {pastedBlocks.map((block) => (
-                  <span key={block.id} className="relative inline-flex items-center gap-1 rounded-md bg-secondary border border-border px-2 py-0.5 text-[11px] text-muted-foreground font-mono group/paste">
-                    [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
-                    <button
-                      onClick={() => setPastedBlocks((prev) => prev.filter((b) => b.id !== block.id))}
-                      className="text-muted-foreground/50 hover:text-destructive ml-0.5"
-                    >
-                      x
-                    </button>
-                    {/* Preview on hover */}
-                    <div className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg z-50 font-mono whitespace-pre-wrap hidden group-hover/paste:block">
-                      {block.content.slice(0, 2000)}
-                      {block.content.length > 2000 && "\n..."}
-                    </div>
-                  </span>
-                ))}
-              </div>
+          <RichPasteInput
+            ref={textareaRef}
+            value={input}
+            onChange={onInputChange}
+            onKeyDown={handleKeyDown}
+            blocks={pastedBlocks}
+            onPasteBlock={(block) => setPastedBlocks((prev) => [...prev, block])}
+            onRemoveBlock={(id) => setPastedBlocks((prev) => prev.filter((b) => b.id !== id))}
+            placeholder={
+              isWorking
+                ? `Taper un message (sera envoye quand Claude aura fini)...`
+                : `Message ou / pour les commandes...`
+            }
+            disabled={!connected}
+            className={cn(isWorking ? "border-yellow-400/30" : "border-border")}
+          />
+          <div className="flex flex-col justify-end gap-1.5">
+            {isWorking && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                onClick={handleStop}
+              >
+                <Square className="h-3 w-3" />
+                Stop
+              </Button>
             )}
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={(e) => {
-                const pasted = e.clipboardData.getData("text");
-                const lineCount = pasted.split("\n").length;
-                // Only collapse if pasted text is long (>5 lines)
-                if (lineCount > 5) {
-                  e.preventDefault();
-                  setPastedBlocks((prev) => [
-                    ...prev,
-                    { id: crypto.randomUUID(), content: pasted, lineCount },
-                  ]);
-                }
-                // Short pastes go directly into the textarea (default behavior)
-              }}
-              placeholder={
-                isWorking
-                  ? `Taper un message (sera envoye quand Claude aura fini)...`
-                  : `Message ou / pour les commandes...`
-              }
-              disabled={!connected}
-              className={cn(
-                "flex-1 resize-none rounded-lg border bg-secondary px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50",
-                isWorking ? "border-yellow-400/30" : "border-border"
-              )}
-            />
-          </div>
-          <div className="flex flex-col justify-end gap-1">
             <Button
               onClick={handleSend}
               disabled={!connected || (!input.trim() && pastedBlocks.length === 0)}
               variant={isWorking ? "secondary" : "default"}
-              className="self-end"
             >
               {isWorking ? `En file (${messageQueue.length + 1})` : "Envoyer"}
             </Button>

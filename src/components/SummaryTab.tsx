@@ -1,3 +1,4 @@
+import { useState, useCallback, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -5,8 +6,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Project } from "../types.js";
-import { useApi } from "../hooks/useApi.js";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Download, Check, Trash2, BookOpen, ChevronDown, ChevronRight, Sparkles } from "lucide-react";
+import type { Project, Learning } from "../types.js";
+import { useApi, patch } from "../hooks/useApi.js";
+import { MarkdownContent } from "./MarkdownContent.js";
 
 interface ProjectWithSummary extends Project {
   summary: string | null;
@@ -36,6 +41,9 @@ export function SummaryTab({ project }: Props) {
 
   return (
     <div className="flex max-w-3xl flex-col gap-4 p-6">
+      {/* Session learnings */}
+      <LearningsSection project={project} />
+
       {/* Project summary */}
       <Card>
         <CardHeader>
@@ -128,6 +136,175 @@ export function SummaryTab({ project }: Props) {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function LearningsSection({ project }: { project: Project }) {
+  const [learnings, setLearnings] = useState<Learning[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<string | null>(null);
+
+  const fetchLearnings = useCallback(async () => {
+    const res = await fetch(`/api/learnings/${project.id}`);
+    setLearnings(await res.json());
+  }, [project.id]);
+
+  useEffect(() => {
+    fetchLearnings();
+    // Poll-less approach: listen to learnings:done via WS is already done in ChatTab.
+    // Re-fetch periodically while on this tab (every 30s) in case user doesn't switch tabs.
+    const interval = setInterval(fetchLearnings, 30000);
+    return () => clearInterval(interval);
+  }, [fetchLearnings]);
+
+  const handleMarkReviewed = useCallback(async (id: number, reviewed: boolean) => {
+    await patch(`/learnings/${id}`, { reviewed });
+    fetchLearnings();
+  }, [fetchLearnings]);
+
+  const handleDelete = useCallback(async (id: number) => {
+    await fetch(`/api/learnings/${id}`, { method: "DELETE" });
+    fetchLearnings();
+  }, [fetchLearnings]);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    setExportResult(null);
+    try {
+      const res = await fetch(`/api/learnings/${project.id}/export`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setExportResult(`Exporte dans .claude/skills/project-learnings/`);
+      } else {
+        setExportResult(`Erreur: ${data.error}`);
+      }
+    } finally {
+      setExporting(false);
+      fetchLearnings();
+    }
+  }, [project.id, fetchLearnings]);
+
+  const unreviewedCount = learnings.filter((l) => !l.reviewed).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-purple-400" />
+            Session learnings
+            {unreviewedCount > 0 && (
+              <Badge variant="outline" className="text-[10px] border-purple-400/40 text-purple-400">
+                {unreviewedCount} nouveau{unreviewedCount > 1 ? "x" : ""}
+              </Badge>
+            )}
+          </CardTitle>
+          {learnings.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-xs"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              <Download className="h-3 w-3" />
+              {exporting ? "Export..." : "Exporter en skill"}
+            </Button>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          Apprentissages auto-générés après chaque session : impasses, contexte manquant, recommandations pour ton CLAUDE.md/skills.
+        </CardDescription>
+        {exportResult && (
+          <p className="text-[11px] text-muted-foreground mt-1">{exportResult}</p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {learnings.length === 0 ? (
+          <p className="text-xs italic text-muted-foreground py-4 text-center">
+            Aucun apprentissage pour l'instant. Ils seront générés automatiquement après chaque session significative.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {learnings.map((l) => (
+              <LearningCard
+                key={l.id}
+                learning={l}
+                onMarkReviewed={handleMarkReviewed}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function LearningCard({
+  learning,
+  onMarkReviewed,
+  onDelete,
+}: {
+  learning: Learning;
+  onMarkReviewed: (id: number, reviewed: boolean) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(!learning.reviewed);
+
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-secondary/30"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="text-xs text-muted-foreground">
+          {new Date(learning.createdAt).toLocaleDateString("fr-FR", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+        {!learning.reviewed && (
+          <Badge variant="outline" className="text-[9px] border-purple-400/40 text-purple-400">
+            new
+          </Badge>
+        )}
+        {learning.exported && (
+          <Badge variant="outline" className="text-[9px] border-green-400/40 text-green-400">
+            <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+            exporté
+          </Badge>
+        )}
+        <span className="ml-auto flex gap-1">
+          {!learning.reviewed && (
+            <span
+              role="button"
+              onClick={(e) => { e.stopPropagation(); onMarkReviewed(learning.id, true); }}
+              className="flex h-5 w-5 items-center justify-center rounded hover:bg-secondary cursor-pointer"
+              title="Marquer comme vu"
+            >
+              <Check className="h-3 w-3 text-muted-foreground" />
+            </span>
+          )}
+          <span
+            role="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(learning.id); }}
+            className="flex h-5 w-5 items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive cursor-pointer"
+            title="Supprimer"
+          >
+            <Trash2 className="h-3 w-3" />
+          </span>
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2">
+          <MarkdownContent content={learning.rawReport} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { projects, sessions } from "../db/schema.js";
+import { projects, sessions, conversations, messages, todos, marketingDrafts, marketingAssets } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -13,6 +13,7 @@ function getGitRemoteUrl(projectPath: string): string | null {
       cwd: projectPath,
       encoding: "utf-8",
       timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
 
     // Convert SSH to HTTPS: git@github.com:user/repo.git -> https://github.com/user/repo
@@ -74,6 +75,57 @@ app.get("/:id/workspaces", (c) => {
 app.patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const body = await c.req.json();
+
+  // If path is being changed, handle rename/move logic
+  if (body.path) {
+    const currentProject = db.select().from(projects).where(eq(projects.id, id)).get();
+    if (!currentProject) return c.json({ error: "Project not found" }, 404);
+
+    const newPath = body.path.trim();
+    const oldPath = currentProject.path;
+
+    if (newPath !== oldPath) {
+      // Check if another project already uses this path in DB
+      const otherProject = db.select().from(projects).where(eq(projects.path, newPath)).get();
+      if (otherProject && otherProject.id !== id) {
+        return c.json({ error: "Un autre projet utilise déjà ce chemin" }, 409);
+      }
+
+      const newPathExists = existsSync(newPath);
+      const oldPathExists = existsSync(oldPath);
+
+      if (newPathExists) {
+        return c.json({ error: `Un dossier existe déjà à cet emplacement: ${newPath}` }, 409);
+      }
+
+      try {
+        const { renameSync, mkdirSync } = await import("fs");
+        if (oldPathExists) {
+          // Rename/move the existing folder
+          renameSync(oldPath, newPath);
+        } else {
+          // Old folder gone, create new empty folder at new location
+          mkdirSync(newPath, { recursive: true });
+        }
+      } catch (err) {
+        return c.json({ error: `Échec du déplacement: ${err}` }, 500);
+      }
+
+      body.path = newPath;
+      if (!body.name) {
+        body.name = newPath.split("/").pop() || "unknown";
+      }
+
+      // Clear the claudeSessionId of any in-memory agent session for this project
+      // (Claude sessions are tied to cwd, so rename invalidates them)
+      // This is done via the DB indirectly — but also clear conversations' sessionId
+      db.update(conversations)
+        .set({ claudeSessionId: null })
+        .where(eq(conversations.projectId, id))
+        .run();
+    }
+  }
+
   db.update(projects)
     .set({ ...body, updatedAt: new Date().toISOString() })
     .where(eq(projects.id, id))
@@ -146,6 +198,92 @@ app.post("/add", async (c) => {
   }
   const project = db.select().from(projects).where(eq(projects.path, path)).get();
   return c.json(project);
+});
+
+// POST /api/projects/create - create a new folder and register it as a project
+app.post("/create", async (c) => {
+  const rootDir = (c.get("rootDir" as never) as string) || process.cwd();
+  const body = await c.req.json();
+  const name = body.name?.trim();
+  const initGit = body.initGit ?? true;
+
+  if (!name) return c.json({ error: "Name required" }, 400);
+  if (!/^[a-zA-Z0-9_\-.]+$/.test(name)) {
+    return c.json({ error: "Invalid name (use letters, numbers, -, _, .)" }, 400);
+  }
+
+  const path = join(rootDir, name);
+  if (existsSync(path)) return c.json({ error: "Directory already exists" }, 409);
+
+  try {
+    const { mkdirSync } = await import("fs");
+    mkdirSync(path, { recursive: true });
+
+    if (initGit) {
+      execSync("git init", { cwd: path, stdio: "ignore" });
+    }
+  } catch (err) {
+    return c.json({ error: `Failed to create directory: ${err}` }, 500);
+  }
+
+  const existing = db.select().from(projects).where(eq(projects.path, path)).get();
+  if (!existing) {
+    db.insert(projects).values({ name, path }).run();
+  }
+  const project = db.select().from(projects).where(eq(projects.path, path)).get();
+  return c.json(project);
+});
+
+// DELETE /api/projects/:id - remove project + all related data
+// Query param ?deleteFolder=true to also delete the folder on disk
+app.delete("/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  const deleteFolder = c.req.query("deleteFolder") === "true";
+
+  const project = db.select().from(projects).where(eq(projects.id, id)).get();
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  // Collect marketing asset file paths so we can unlink them
+  const assets = db
+    .select()
+    .from(marketingAssets)
+    .where(eq(marketingAssets.projectId, id))
+    .all();
+
+  // Fetch conversations to delete their messages
+  const projectConversations = db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.projectId, id))
+    .all();
+
+  try {
+    // Delete child tables first (respect FK order)
+    for (const conv of projectConversations) {
+      db.delete(messages).where(eq(messages.conversationId, conv.id)).run();
+    }
+    db.delete(conversations).where(eq(conversations.projectId, id)).run();
+    db.delete(sessions).where(eq(sessions.projectId, id)).run();
+    db.delete(todos).where(eq(todos.projectId, id)).run();
+    db.delete(marketingDrafts).where(eq(marketingDrafts.projectId, id)).run();
+    db.delete(marketingAssets).where(eq(marketingAssets.projectId, id)).run();
+    db.delete(projects).where(eq(projects.id, id)).run();
+
+    // Unlink asset files on disk
+    const { unlinkSync, rmSync } = await import("fs");
+    for (const asset of assets) {
+      try { unlinkSync(asset.filePath); } catch {}
+    }
+
+    // Optionally remove project folder on disk
+    if (deleteFolder && existsSync(project.path)) {
+      rmSync(project.path, { recursive: true, force: true });
+    }
+
+    return c.json({ ok: true, deletedFolder: deleteFolder });
+  } catch (err) {
+    return c.json({ error: `Échec de la suppression: ${err}` }, 500);
+  }
 });
 
 export default app;

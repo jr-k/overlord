@@ -65,6 +65,9 @@ export function initDb() {
   if (!convCols.some((c) => c.name === "events_json")) {
     sqlite.exec("ALTER TABLE conversations ADD COLUMN events_json TEXT");
   }
+  if (!convCols.some((c) => c.name === "channel")) {
+    sqlite.exec("ALTER TABLE conversations ADD COLUMN channel TEXT NOT NULL DEFAULT 'chat'");
+  }
 
   const projCols = sqlite.pragma("table_info(projects)") as { name: string }[];
   if (!projCols.some((c) => c.name === "favorite")) {
@@ -79,6 +82,65 @@ export function initDb() {
   if (!projCols.some((c) => c.name === "last_summary_at")) {
     sqlite.exec("ALTER TABLE projects ADD COLUMN last_summary_at TEXT");
   }
+  if (!projCols.some((c) => c.name === "system_prompt")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN system_prompt TEXT");
+  }
+  if (!projCols.some((c) => c.name === "model")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN model TEXT");
+  }
+  if (!projCols.some((c) => c.name === "allowed_tools")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN allowed_tools TEXT");
+  }
+  if (!projCols.some((c) => c.name === "tagline")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN tagline TEXT");
+  }
+  if (!projCols.some((c) => c.name === "short_description")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN short_description TEXT");
+  }
+  if (!projCols.some((c) => c.name === "long_description")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN long_description TEXT");
+  }
+  if (!projCols.some((c) => c.name === "links")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN links TEXT");
+  }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS learnings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      dead_ends TEXT,
+      missing_context TEXT,
+      recommendations TEXT,
+      raw_report TEXT NOT NULL,
+      exported INTEGER NOT NULL DEFAULT 0,
+      reviewed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS marketing_assets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      mime_type TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS marketing_drafts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      platform TEXT NOT NULL,
+      title TEXT,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      published_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS todos (
