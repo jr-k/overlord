@@ -18,6 +18,7 @@ import marketingRoutes from "./routes/marketing.js";
 import skillsRoutes from "./routes/skills.js";
 import learningsRoutes from "./routes/learnings.js";
 import codegraphRoutes from "./routes/codegraph.js";
+import uploadsRoutes from "./routes/uploads.js";
 
 import { setWebSocketServer } from "./ws.js";
 import { attachWsHandlers } from "./agent/ws-handler.js";
@@ -46,6 +47,7 @@ app.route("/api/marketing", marketingRoutes);
 app.route("/api/skills", skillsRoutes);
 app.route("/api/learnings", learningsRoutes);
 app.route("/api/codegraph", codegraphRoutes);
+app.route("/api/uploads", uploadsRoutes);
 
 app.post("/api/terminal/open", async (c) => {
   const body = await c.req.json();

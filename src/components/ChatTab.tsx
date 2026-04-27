@@ -6,7 +6,7 @@ import { Square, Copy, Check, ArrowDown, Undo2, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolUseCard } from "./ToolUseCard.js";
-import { RichPasteInput, type RichPasteInputHandle } from "./RichPasteInput.js";
+import { RichPasteInput, type RichPasteInputHandle, type FileBlock } from "./RichPasteInput.js";
 import type { Project } from "../types.js";
 
 type AgentStatus = "idle" | "waiting" | "running";
@@ -24,6 +24,7 @@ interface ChatEntry {
   content: string;
   displayContent?: string; // What to show in UI (may differ from content sent to Claude)
   pastedBlocks?: PastedBlock[];
+  fileBlocks?: FileBlock[];
   toolName?: string;
   toolInput?: Record<string, any>;
   toolResult?: string;
@@ -101,31 +102,53 @@ function extractFromEvents(events: any[], indexOffset = 0): ChatEntry[] {
   return entries;
 }
 
-function InlineDisplay({ content, blocks }: { content: string; blocks: PastedBlock[] }) {
+function InlineDisplay({ content, blocks, files }: { content: string; blocks: PastedBlock[]; files?: FileBlock[] }) {
   const blocksById = new Map(blocks.map((b) => [b.id, b]));
-  const parts: (string | PastedBlock)[] = [];
+  const filesById = new Map((files ?? []).map((f) => [f.id, f]));
+  type Part = { kind: "text"; text: string } | { kind: "paste"; block: PastedBlock } | { kind: "file"; file: FileBlock };
+  const parts: Part[] = [];
   let lastIndex = 0;
-  const regex = /\{\{paste:([^}]+)\}\}/g;
+  const regex = /\{\{(paste|file):([^}]+)\}\}/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
-    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
-    const block = blocksById.get(match[1]);
-    if (block) parts.push(block);
-    else parts.push(match[0]); // keep placeholder as-is if block missing
+    if (match.index > lastIndex) parts.push({ kind: "text", text: content.slice(lastIndex, match.index) });
+    if (match[1] === "paste") {
+      const block = blocksById.get(match[2]);
+      if (block) parts.push({ kind: "paste", block });
+      else parts.push({ kind: "text", text: match[0] });
+    } else {
+      const file = filesById.get(match[2]);
+      if (file) parts.push({ kind: "file", file });
+      else parts.push({ kind: "text", text: match[0] });
+    }
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+  if (lastIndex < content.length) parts.push({ kind: "text", text: content.slice(lastIndex) });
 
   return (
     <div className="whitespace-pre-wrap">
-      {parts.map((p, i) =>
-        typeof p === "string" ? (
-          <span key={i}>{p}</span>
-        ) : (
-          <PastedBadge key={i} block={p} />
-        )
-      )}
+      {parts.map((p, i) => {
+        if (p.kind === "text") return <span key={i}>{p.text}</span>;
+        if (p.kind === "paste") return <PastedBadge key={i} block={p.block} />;
+        return <FileBadge key={i} file={p.file} />;
+      })}
     </div>
+  );
+}
+
+function FileBadge({ file }: { file: FileBlock }) {
+  const sizeLabel = file.size < 1024
+    ? `${file.size} B`
+    : file.size < 1024 * 1024
+      ? `${(file.size / 1024).toFixed(1)} KB`
+      : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/20 border border-primary-foreground/30 px-2 py-0.5 text-[11px] font-mono cursor-default"
+      title={`${file.path} • ${sizeLabel}`}
+    >
+      📄 {file.filename} ({sizeLabel})
+    </span>
   );
 }
 
@@ -266,11 +289,14 @@ const UserMessage = React.memo(function UserMessage({
         </div>
         <div className="text-sm leading-relaxed select-text">
           {entry.displayContent ? (
-            <InlineDisplay content={entry.displayContent} blocks={entry.pastedBlocks ?? []} />
-          ) : entry.pastedBlocks && entry.pastedBlocks.length > 0 ? (
+            <InlineDisplay content={entry.displayContent} blocks={entry.pastedBlocks ?? []} files={entry.fileBlocks} />
+          ) : (entry.pastedBlocks?.length || entry.fileBlocks?.length) ? (
             <div className="flex flex-wrap gap-1.5">
-              {entry.pastedBlocks.map((block) => (
+              {entry.pastedBlocks?.map((block) => (
                 <PastedBadge key={block.id} block={block} />
+              ))}
+              {entry.fileBlocks?.map((file) => (
+                <FileBadge key={file.id} file={file} />
               ))}
             </div>
           ) : (
@@ -416,11 +442,47 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     avg_savings_pct: number;
   } | null>(null);
 
+  // Codegraph usage estimate — heuristic tokens saved per tool call (arbitrary, tweakable).
+  // Each value = rough tokens a Read+Grep equivalent would have consumed.
+  const codegraphSavingsPerCall: Record<string, number> = {
+    mcp__codegraph__codegraph_context: 8000,
+    mcp__codegraph__codegraph_search: 3000,
+    mcp__codegraph__codegraph_callers: 5000,
+    mcp__codegraph__codegraph_callees: 5000,
+    mcp__codegraph__codegraph_impact: 6000,
+    mcp__codegraph__codegraph_explore: 4000,
+    mcp__codegraph__codegraph_node: 1500,
+    mcp__codegraph__codegraph_files: 500,
+    mcp__codegraph__codegraph_status: 100,
+  };
+
+  const codegraphStats = useMemo(() => {
+    const perTool: Record<string, { calls: number; consumed: number; saved: number }> = {};
+    let totalCalls = 0;
+    let totalConsumed = 0;
+    let totalSaved = 0;
+    for (const e of entries) {
+      if (e.role !== "tool" || !e.toolName) continue;
+      if (!e.toolName.startsWith("mcp__codegraph__")) continue;
+      const consumed = Math.ceil((e.toolResult?.length ?? 0) / 4);
+      const saved = codegraphSavingsPerCall[e.toolName] ?? 0;
+      perTool[e.toolName] ??= { calls: 0, consumed: 0, saved: 0 };
+      perTool[e.toolName].calls += 1;
+      perTool[e.toolName].consumed += consumed;
+      perTool[e.toolName].saved += saved;
+      totalCalls += 1;
+      totalConsumed += consumed;
+      totalSaved += saved;
+    }
+    return { perTool, totalCalls, totalConsumed, totalSaved };
+  }, [entries]);
+
   // Message queue — messages typed while agent is working
   const [messageQueue, setMessageQueue] = useState<string[]>([]);
 
   // Pasted content — stored separately, shown as badges
   const [pastedBlocks, setPastedBlocks] = useState<{ id: string; content: string; lineCount: number }[]>([]);
+  const [fileBlocks, setFileBlocks] = useState<FileBlock[]>([]);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialScrollDone = useRef(false);
@@ -788,14 +850,22 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
   const handleSend = useCallback(() => {
     const currentBlocks = [...pastedBlocks];
+    const currentFiles = [...fileBlocks];
     const typedText = input;
 
     // Replace {{paste:id}} placeholders with actual content at their position
     const blocksById = new Map(currentBlocks.map((b) => [b.id, b]));
-    let rawMessage = typedText.replace(/\{\{paste:([^}]+)\}\}/g, (_, id) => {
-      const block = blocksById.get(id);
-      return block ? `\n${block.content}\n` : "";
-    }).trim();
+    const filesById = new Map(currentFiles.map((f) => [f.id, f]));
+    let rawMessage = typedText
+      .replace(/\{\{paste:([^}]+)\}\}/g, (_, id) => {
+        const block = blocksById.get(id);
+        return block ? `\n${block.content}\n` : "";
+      })
+      .replace(/\{\{file:([^}]+)\}\}/g, (_, id) => {
+        const file = filesById.get(id);
+        return file ? `[Joined file at ${file.path}]` : "";
+      })
+      .trim();
 
     // If there are leftover blocks never referenced (shouldn't happen normally), append them
     const usedIds = new Set<string>();
@@ -803,6 +873,13 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     const unusedBlocks = currentBlocks.filter((b) => !usedIds.has(b.id));
     if (unusedBlocks.length > 0) {
       rawMessage = [rawMessage, ...unusedBlocks.map((b) => b.content)].filter(Boolean).join("\n\n");
+    }
+
+    const usedFileIds = new Set<string>();
+    typedText.replace(/\{\{file:([^}]+)\}\}/g, (_, id) => { usedFileIds.add(id); return ""; });
+    const unusedFiles = currentFiles.filter((f) => !usedFileIds.has(f.id));
+    if (unusedFiles.length > 0) {
+      rawMessage = [rawMessage, ...unusedFiles.map((f) => `[Joined file at ${f.path}]`)].filter(Boolean).join("\n\n");
     }
 
     if (!rawMessage || !wsRef.current) return;
@@ -817,6 +894,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     setSlashDismissed(true);
     onInputChange("");
     setPastedBlocks([]);
+    setFileBlocks([]);
 
     // Request notification permission on first interaction
     if (Notification.permission === "default") {
@@ -838,6 +916,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         content: fullMessage,
         displayContent: typedText.trim() || undefined,
         pastedBlocks: currentBlocks.length > 0 ? currentBlocks : undefined,
+        fileBlocks: currentFiles.length > 0 ? currentFiles : undefined,
       },
     ]);
 
@@ -850,7 +929,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         channel,
       })
     );
-  }, [input, pastedBlocks, project, onInputChange, agentStatus, channel, activeWorkspaces]);
+  }, [input, pastedBlocks, fileBlocks, project, onInputChange, agentStatus, channel, activeWorkspaces]);
 
   const handleAnswerQuestions = useCallback((answer: string) => {
     if (!wsRef.current) return;
@@ -1013,6 +1092,14 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                       RTK -{Math.round(rtkSavings.avg_savings_pct)}%
                     </span>
                   )}
+                  {codegraphStatus.indexed && (
+                    <span className={cn(
+                      "font-semibold",
+                      codegraphStats.totalCalls > 0 ? "text-cyan-400" : "text-muted-foreground/60"
+                    )}>
+                      CG {codegraphStats.totalCalls}×{codegraphStats.totalCalls > 0 ? ` ~${formatTokens(codegraphStats.totalSaved)}` : ""}
+                    </span>
+                  )}
                 </div>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
@@ -1025,6 +1112,29 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                   <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cout API cumule de cette session ({tokenStats.turns} echange{tokenStats.turns > 1 ? "s" : ""})</p>
                   {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
                     <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens economises par RTK sur {rtkSavings.total_commands} commandes shell (compresse git status, ls, etc.)</p>
+                  )}
+                  {codegraphStatus.indexed && (
+                    <div className="border-t border-border/50 pt-1.5 mt-1.5">
+                      <p><strong className="text-cyan-400">Codegraph</strong> — {codegraphStats.totalCalls} appel{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
+                      {codegraphStats.totalCalls > 0 ? (
+                        <>
+                          <p className="text-muted-foreground">Consomme: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (resultats lus par Claude)</p>
+                          <p className="text-muted-foreground">Estime epargne: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs Read/Grep equivalents</p>
+                          <p className="text-[10px] italic opacity-60 mt-1">Heuristique arbitraire (8k/context, 5k/callers, 3k/search, 0.5k/files). Ratio epargne/consomme = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "—"}x.</p>
+                          <div className="mt-1 space-y-0.5">
+                            {Object.entries(codegraphStats.perTool).map(([tool, s]) => (
+                              <p key={tool} className="text-[10px] text-muted-foreground font-mono">
+                                {tool.replace("mcp__codegraph__codegraph_", "")}: {s.calls}× — {formatTokens(s.consumed)} in / ~{formatTokens(s.saved)} saved
+                              </p>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-[10px] italic opacity-60 mt-1">
+                          MCP active mais Claude ne l'a pas appele. Mentionne-le dans ton message ("utilise codegraph...") ou ajoute une nudge dans le system prompt projet.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </TooltipContent>
@@ -1257,6 +1367,32 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             blocks={pastedBlocks}
             onPasteBlock={(block) => setPastedBlocks((prev) => [...prev, block])}
             onRemoveBlock={(id) => setPastedBlocks((prev) => prev.filter((b) => b.id !== id))}
+            fileBlocks={fileBlocks}
+            onFileSelect={async (file) => {
+              const fd = new FormData();
+              fd.append("file", file);
+              fd.append("projectId", String(project.id));
+              try {
+                const res = await fetch("/api/uploads", { method: "POST", body: fd });
+                if (!res.ok) return null;
+                const data = await res.json();
+                const block: FileBlock = {
+                  id: data.id,
+                  filename: data.filename,
+                  path: data.path,
+                  size: data.size,
+                  mimeType: data.mimeType,
+                };
+                setFileBlocks((prev) => [...prev, block]);
+                return block;
+              } catch {
+                return null;
+              }
+            }}
+            onRemoveFileBlock={(id) => {
+              setFileBlocks((prev) => prev.filter((f) => f.id !== id));
+              fetch(`/api/uploads/${id}?projectId=${project.id}`, { method: "DELETE" }).catch(() => {});
+            }}
             placeholder={
               isWorking
                 ? `Taper un message (sera envoye quand Claude aura fini)...`
@@ -1279,7 +1415,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             )}
             <Button
               onClick={handleSend}
-              disabled={!connected || (!input.trim() && pastedBlocks.length === 0)}
+              disabled={!connected || (!input.trim() && pastedBlocks.length === 0 && fileBlocks.length === 0)}
               variant={isWorking ? "secondary" : "default"}
             >
               {isWorking ? `En file (${messageQueue.length + 1})` : "Envoyer"}

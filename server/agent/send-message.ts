@@ -84,9 +84,12 @@ export function sendMessage(session: AgentSession, message: string) {
       "mcp__codegraph__codegraph_search",
       "mcp__codegraph__codegraph_context",
       "mcp__codegraph__codegraph_callers",
+      "mcp__codegraph__codegraph_callees",
+      "mcp__codegraph__codegraph_impact",
+      "mcp__codegraph__codegraph_node",
+      "mcp__codegraph__codegraph_explore",
       "mcp__codegraph__codegraph_files",
       "mcp__codegraph__codegraph_status",
-      "mcp__codegraph__codegraph_query",
     ];
   }
 
