@@ -1,11 +1,18 @@
 import { join } from "path";
-import { readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, type Dirent } from "fs";
 import { parse as parseYaml } from "yaml";
 
 export interface WorkspaceInfo {
-  type: "pnpm" | "yarn" | "npm" | "nx" | "lerna" | null;
+  type: "pnpm" | "yarn" | "npm" | "nx" | "lerna" | "subfolders" | null;
   packages: WorkspacePackage[];
 }
+
+const SUBFOLDER_IGNORE = new Set([
+  "node_modules", "dist", "build", "out", "target", "coverage",
+  ".next", ".nuxt", ".turbo", ".cache", ".vercel", ".netlify",
+  ".git", ".idea", ".vscode", ".expo", ".yarn", ".pnpm-store",
+  "vendor", "venv", ".venv", "__pycache__", ".DS_Store",
+]);
 
 export interface WorkspacePackage {
   name: string;
@@ -74,7 +81,48 @@ export function detectWorkspaces(projectPath: string): WorkspaceInfo {
     } catch {}
   }
 
-  return { type: null, packages: [] };
+  // Fallback: not a monorepo — list immediate subfolders as scope candidates.
+  // Useful for "container" project dirs that hold loose subprojects.
+  return {
+    type: "subfolders",
+    packages: listSubfolders(projectPath),
+  };
+}
+
+function listSubfolders(root: string): WorkspacePackage[] {
+  if (!existsSync(root) || !statSync(root).isDirectory()) return [];
+  const results: WorkspacePackage[] = [];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true }) as Dirent[];
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue;
+    if (SUBFOLDER_IGNORE.has(entry.name)) continue;
+
+    const fullPath = join(root, entry.name);
+    let packageJson: WorkspacePackage["packageJson"];
+    const pkgJsonPath = join(fullPath, "package.json");
+    if (existsSync(pkgJsonPath)) {
+      try {
+        const raw = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+        packageJson = { name: raw.name, version: raw.version, description: raw.description };
+      } catch {}
+    }
+
+    results.push({
+      name: packageJson?.name ?? entry.name,
+      path: entry.name,
+      fullPath,
+      category: "other",
+      packageJson,
+    });
+  }
+  results.sort((a, b) => a.name.localeCompare(b.name));
+  return results;
 }
 
 /**
