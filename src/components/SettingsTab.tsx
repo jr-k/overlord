@@ -41,6 +41,7 @@ interface Props {
 export function SettingsTab({ project }: Props) {
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt ?? "");
   const [model, setModel] = useState(project.model ?? "");
+  const [learningsEnabled, setLearningsEnabled] = useState(project.learningsEnabled ?? true);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => {
     if (project.allowedTools) {
       try { return new Set(JSON.parse(project.allowedTools)); } catch {}
@@ -49,12 +50,27 @@ export function SettingsTab({ project }: Props) {
   });
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [effectivePrompt, setEffectivePrompt] = useState<{
+    base: string;
+    nudges: { name: string; content: string; reason: string }[];
+    full: string;
+  } | null>(null);
+  const [showEffective, setShowEffective] = useState(false);
 
   useEffect(() => {
     setSystemPrompt(project.systemPrompt ?? "");
     setModel(project.model ?? "");
+    setLearningsEnabled(project.learningsEnabled ?? true);
     setDirty(false);
   }, [project.id]);
+
+  // Re-fetch the effective prompt whenever the saved settings change
+  useEffect(() => {
+    fetch(`/api/projects/${project.id}/system-prompt?channel=chat`)
+      .then((r) => r.json())
+      .then((data) => setEffectivePrompt(data))
+      .catch(() => setEffectivePrompt(null));
+  }, [project.id, saved]);
 
   const toggleTool = useCallback((tool: string) => {
     setSelectedTools((prev) => {
@@ -71,11 +87,12 @@ export function SettingsTab({ project }: Props) {
       systemPrompt: systemPrompt || null,
       model: model || null,
       allowedTools: JSON.stringify([...selectedTools]),
+      learningsEnabled,
     });
     setSaved(true);
     setDirty(false);
     setTimeout(() => setSaved(false), 2000);
-  }, [project.id, systemPrompt, model, selectedTools]);
+  }, [project.id, systemPrompt, model, selectedTools, learningsEnabled]);
 
   const handleReset = useCallback(() => {
     setSystemPrompt("");
@@ -144,6 +161,65 @@ export function SettingsTab({ project }: Props) {
             placeholder={DEFAULT_SYSTEM_PROMPT}
             className="min-h-[120px] resize-y font-mono text-xs"
           />
+
+          {effectivePrompt && (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold">
+                  Effective prompt sent to Claude
+                  {effectivePrompt.nudges.length > 0 && (
+                    <span className="ml-2 text-[10px] text-emerald-400 font-normal">
+                      + {effectivePrompt.nudges.length} auto-nudge{effectivePrompt.nudges.length > 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setShowEffective((s) => !s)}>
+                  {showEffective ? "Masquer" : "Afficher"}
+                </Button>
+              </div>
+              {effectivePrompt.nudges.length > 0 && (
+                <div className="space-y-1">
+                  {effectivePrompt.nudges.map((n) => (
+                    <div key={n.name} className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5 text-[11px]">
+                      <span className="font-semibold text-emerald-400">{n.name}</span>
+                      <span className="ml-2 text-muted-foreground">{n.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {showEffective && (
+                <pre className="max-h-[300px] overflow-auto rounded-md border border-border bg-secondary/50 p-3 text-[11px] font-mono whitespace-pre-wrap select-text">
+                  {effectivePrompt.full}
+                </pre>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Session analysis */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Analyse de session</CardTitle>
+          <CardDescription className="text-xs">
+            A la fin de chaque conversation chat (≥3 tool uses ou messages), Overlord lance un agent Claude qui analyse la session et extrait les apprentissages (dead ends, missing context, recommandations) — visibles dans l'onglet Summary.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input
+              type="checkbox"
+              checked={learningsEnabled}
+              onChange={(e) => { setLearningsEnabled(e.target.checked); setDirty(true); }}
+              className="h-4 w-4 rounded border-border accent-primary"
+            />
+            <span>Activer l'analyse automatique apres chaque session</span>
+          </label>
+          {!learningsEnabled && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Desactive : les sessions ne seront plus analysees. Ca economise tokens + temps mais tu n'auras plus de retro auto.
+            </p>
+          )}
         </CardContent>
       </Card>
 

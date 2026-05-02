@@ -6,6 +6,8 @@ import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import { detectWorkspaces } from "../workspaces.js";
+import { buildEffectiveSystemPrompt } from "../agent/system-prompt.js";
+import type { Channel } from "../agent/types.js";
 
 function getGitRemoteUrl(projectPath: string): string | null {
   try {
@@ -69,6 +71,17 @@ app.get("/:id/workspaces", (c) => {
 
   const info = detectWorkspaces(project.path);
   return c.json(info);
+});
+
+// GET /api/projects/:id/system-prompt?channel=chat — preview the effective system prompt
+app.get("/:id/system-prompt", (c) => {
+  const id = Number(c.req.param("id"));
+  const channel = (c.req.query("channel") as Channel) || "chat";
+  const project = db.select().from(projects).where(eq(projects.id, id)).get();
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  const parts = buildEffectiveSystemPrompt(project, channel, project.path);
+  return c.json(parts);
 });
 
 // PATCH /api/projects/:id - update project status

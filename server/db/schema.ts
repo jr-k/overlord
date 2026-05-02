@@ -18,6 +18,7 @@ export const projects = sqliteTable("projects", {
   shortDescription: text("short_description"),
   longDescription: text("long_description"),
   links: text("links"),
+  learningsEnabled: integer("learnings_enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

@@ -14,6 +14,7 @@ export interface Project {
   shortDescription: string | null;
   longDescription: string | null;
   links: string | null;
+  learningsEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   latestSession?: Session | null;

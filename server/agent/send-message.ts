@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { createGitSnapshot } from "./git-snapshot.js";
 import { broadcast, saveEvents, saveEventsNow } from "./sessions.js";
 import { broadcastAll } from "../ws.js";
-import { buildMarketingSystemPrompt } from "./marketing-prompt.js";
+import { buildEffectiveSystemPrompt } from "./system-prompt.js";
 import { generateSummary } from "./summary.js";
 import { generateLearnings } from "./learnings.js";
 import { isIndexed as isCodegraphIndexed, runCodegraph, CODEGRAPH_BIN } from "../routes/codegraph.js";
@@ -47,7 +47,7 @@ export function sendMessage(session: AgentSession, message: string) {
   if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
     mcpServers.codegraph = {
       command: CODEGRAPH_BIN,
-      args: ["serve", "--mcp", session.projectPath],
+      args: ["serve", "--mcp", "-p", session.projectPath],
     };
   }
 
@@ -55,13 +55,9 @@ export function sendMessage(session: AgentSession, message: string) {
 
   const project = db.select().from(projects).where(eq(projects.id, session.projectId)).get();
 
-  const defaultChatPrompt = "Match the language of the user's message in your response. When you respond in French, always use proper accents (é, è, ê, à, â, ù, û, ç, ô, etc.) — never write French without accents.";
+  const codegraphActive = session.channel === "chat" && isCodegraphIndexed(session.projectPath);
 
-  const marketingPrompt = buildMarketingSystemPrompt(project);
-
-  const systemPrompt = session.channel === "marketing"
-    ? marketingPrompt
-    : (project?.systemPrompt || defaultChatPrompt);
+  const { full: systemPrompt } = buildEffectiveSystemPrompt(project, session.channel, session.projectPath);
 
   const model = project?.model;
 
@@ -78,7 +74,7 @@ export function sendMessage(session: AgentSession, message: string) {
     try { allowedTools = JSON.parse(project.allowedTools); } catch {}
   }
 
-  if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
+  if (codegraphActive) {
     allowedTools = [
       ...allowedTools,
       "mcp__codegraph__codegraph_search",
@@ -211,7 +207,7 @@ export function sendMessage(session: AgentSession, message: string) {
       if (session.channel === "chat" && isCodegraphIndexed(session.projectPath)) {
         runCodegraph(["sync", session.projectPath], session.projectPath, 60000).catch(() => {});
       }
-      if (session.channel === "chat") {
+      if (session.channel === "chat" && project?.learningsEnabled !== false) {
         const toolUseCount = session.events.filter(
           (e: any) => e.type === "stream_event" && e.event?.type === "content_block_start" && e.event?.content_block?.type === "tool_use"
         ).length;

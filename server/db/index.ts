@@ -103,6 +103,9 @@ export function initDb() {
   if (!projCols.some((c) => c.name === "links")) {
     sqlite.exec("ALTER TABLE projects ADD COLUMN links TEXT");
   }
+  if (!projCols.some((c) => c.name === "learnings_enabled")) {
+    sqlite.exec("ALTER TABLE projects ADD COLUMN learnings_enabled INTEGER NOT NULL DEFAULT 1");
+  }
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS learnings (
