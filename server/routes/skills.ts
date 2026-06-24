@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { readFileSync, readdirSync, existsSync, statSync } from "fs";
-import { join } from "path";
+import { readFileSync, readdirSync, existsSync, statSync, rmSync } from "fs";
+import { dirname, join, relative, resolve, sep } from "path";
 import { homedir } from "os";
 
 const app = new Hono();
@@ -128,6 +128,45 @@ app.get("/:projectId/content", (c) => {
     return c.json({ content });
   } catch {
     return c.json({ error: "not found" }, 404);
+  }
+});
+
+app.delete("/:projectId", async (c) => {
+  const projectId = Number(c.req.param("projectId"));
+  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+  if (!project) return c.json({ error: "Not found" }, 404);
+
+  const body = await c.req.json();
+  const source = body.source;
+  if (!source || typeof source !== "string") {
+    return c.json({ error: "source required" }, 400);
+  }
+
+  const sourcePath = resolve(source);
+  const allowedBases = [
+    resolve(project.path, ".claude"),
+    resolve(homedir(), ".claude"),
+  ];
+  const isAllowed = allowedBases.some((base) => {
+    const rel = relative(base, sourcePath);
+    return rel && !rel.startsWith("..") && !rel.startsWith(sep);
+  });
+  if (!isAllowed) return c.json({ error: "forbidden" }, 403);
+
+  const sourceRel = allowedBases
+    .map((base) => relative(base, sourcePath))
+    .find((rel) => rel && !rel.startsWith("..") && !rel.startsWith(sep));
+  const isSkill = sourceRel?.startsWith(`skills${sep}`) && sourcePath.endsWith(`${sep}SKILL.md`);
+  const isCommand = sourceRel?.startsWith(`commands${sep}`) && sourcePath.endsWith(".md");
+  if (!isSkill && !isCommand) return c.json({ error: "forbidden" }, 403);
+  if (!existsSync(sourcePath)) return c.json({ error: "not found" }, 404);
+
+  const target = isSkill ? dirname(sourcePath) : sourcePath;
+  try {
+    rmSync(target, { recursive: true, force: false });
+    return c.json({ ok: true });
+  } catch {
+    return c.json({ error: "delete failed" }, 500);
   }
 });
 

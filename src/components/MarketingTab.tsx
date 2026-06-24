@@ -42,7 +42,7 @@ export function MarketingTab({ project, input, onInputChange }: Props) {
       </aside>
 
       {/* Main chat */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-h-0 min-w-0">
         <ChatTab
           project={project}
           input={input}
@@ -100,7 +100,7 @@ function ProjectInfoCard({ project }: { project: Project }) {
           <Input
             value={tagline}
             onChange={(e) => { setTagline(e.target.value); setDirty(true); }}
-            placeholder="Une phrase qui resume le projet"
+            placeholder="A one-line summary of the project"
           />
         </div>
         <div>
@@ -108,7 +108,7 @@ function ProjectInfoCard({ project }: { project: Project }) {
           <Textarea
             value={shortDesc}
             onChange={(e) => { setShortDesc(e.target.value); setDirty(true); }}
-            placeholder="Description courte (2-3 phrases), utilisee pour le press kit, social media..."
+            placeholder="Short description (2-3 sentences), used for the press kit, social media..."
             className="min-h-[70px]"
           />
         </div>
@@ -117,7 +117,7 @@ function ProjectInfoCard({ project }: { project: Project }) {
           <Textarea
             value={longDesc}
             onChange={(e) => { setLongDesc(e.target.value); setDirty(true); }}
-            placeholder="Description complete pour la landing page, store..."
+            placeholder="Full description for the landing page, store..."
             className="min-h-[120px]"
           />
         </div>
@@ -126,7 +126,7 @@ function ProjectInfoCard({ project }: { project: Project }) {
           <Textarea
             value={links}
             onChange={(e) => { setLinks(e.target.value); setDirty(true); }}
-            placeholder="Un lien par ligne: twitter:https://..., website:https://..., steam:https://..."
+            placeholder="One link per line: twitter:https://..., website:https://..., steam:https://..."
             className="min-h-[80px] font-mono text-xs"
           />
         </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useId } from "react";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { patch, post } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 import type { AgentStatusMap } from "../App.js";
-import { Star, EyeOff, Eye, Plus, FolderPlus, Check, X } from "lucide-react";
+import { Star, EyeOff, Eye, FolderPlus, FolderSearch, Loader2, Check, X } from "lucide-react";
 
 const AGENT_STATUS_STYLES: Record<string, string> = {
   none:    "bg-zinc-500/50",
@@ -34,12 +34,44 @@ const AGENT_STATUS_STYLES: Record<string, string> = {
   error:   "bg-red-400 shadow-[0_0_4px_rgba(248,113,113,0.4)]",
 };
 
+function OverlordStar({ active }: { active: boolean }) {
+  const gradientId = useId();
+
+  if (!active) {
+    return <Star className="size-4 text-sidebar-foreground/50" />;
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-4 opacity-90 drop-shadow-[0_0_3px_rgba(165,180,252,0.25)]"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="3" y1="21" x2="21" y2="3" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#818cf8" />
+          <stop offset="52%" stopColor="#67e8f9" />
+          <stop offset="100%" stopColor="#ffffff" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M11.48 3.5a.56.56 0 0 1 1.04 0l2.2 5.31a.56.56 0 0 0 .48.35l5.73.46a.56.56 0 0 1 .32.98l-4.36 3.74a.56.56 0 0 0-.18.56l1.33 5.6a.56.56 0 0 1-.84.61l-4.91-3a.56.56 0 0 0-.58 0l-4.91 3a.56.56 0 0 1-.84-.61l1.33-5.6a.56.56 0 0 0-.18-.56L2.85 10.6a.56.56 0 0 1 .32-.98l5.73-.46a.56.56 0 0 0 .48-.35l2.1-5.31Z"
+        fill={`url(#${gradientId})`}
+        stroke={`url(#${gradientId})`}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 interface Props {
   projects: Project[];
   selected: Project | null;
   agentStatuses: AgentStatusMap;
   onSelect: (p: Project) => void;
-  onScan: () => void;
+  onScan: () => void | Promise<void>;
   onProjectUpdate: () => void;
 }
 
@@ -56,6 +88,7 @@ export function ProjectSidebar({
   const [creating, setCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim();
@@ -79,11 +112,15 @@ export function ProjectSidebar({
       const q = search.toLowerCase();
       list = list.filter((p) => p.name.toLowerCase().includes(q));
     }
-    return list;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }, [projects, search, showHidden]);
 
   const favorites = useMemo(() => filtered.filter((p) => p.favorite), [filtered]);
   const others = useMemo(() => filtered.filter((p) => !p.favorite), [filtered]);
+  const visibleProjectCount = useMemo(
+    () => projects.filter((p) => !p.hidden).length,
+    [projects]
+  );
 
   const toggleFavorite = useCallback(
     async (e: React.MouseEvent, project: Project) => {
@@ -103,13 +140,22 @@ export function ProjectSidebar({
     [onProjectUpdate]
   );
 
+  const handleScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      await onScan();
+    } finally {
+      setScanning(false);
+    }
+  }, [onScan]);
+
   const renderProject = (p: Project) => (
     <SidebarMenuItem key={p.id} className="group/project">
       <SidebarMenuButton
         isActive={selected?.id === p.id}
         onClick={() => onSelect(p)}
         tooltip={p.path}
-        className={cn(p.hidden && "opacity-40")}
+        className={cn("pr-12", p.hidden && "opacity-40")}
       >
         <span
           className={cn(
@@ -118,19 +164,16 @@ export function ProjectSidebar({
           )}
         />
         <span className="truncate">{p.name}</span>
-        {p.favorite && (
-          <Star className="ml-auto h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400 group-hover/project:hidden" />
-        )}
       </SidebarMenuButton>
 
       {/* Action buttons — visible on hover */}
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover/project:opacity-100 transition-opacity">
+      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
         <Tooltip>
           <TooltipTrigger>
             <span
               role="button"
               onClick={(e) => toggleHidden(e, p)}
-              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent cursor-pointer"
+              className="flex h-5 w-5 items-center justify-center rounded-sm opacity-0 transition-opacity hover:bg-sidebar-accent group-hover/project:opacity-100 cursor-pointer"
             >
               {p.hidden ? (
                 <Eye className="h-3 w-3 text-sidebar-foreground/50" />
@@ -140,7 +183,7 @@ export function ProjectSidebar({
             </span>
           </TooltipTrigger>
           <TooltipContent side="right" className="text-xs">
-            {p.hidden ? "Afficher" : "Cacher"}
+            {p.hidden ? "Show" : "Hide"}
           </TooltipContent>
         </Tooltip>
 
@@ -149,20 +192,16 @@ export function ProjectSidebar({
             <span
               role="button"
               onClick={(e) => toggleFavorite(e, p)}
-              className="flex h-5 w-5 items-center justify-center rounded-sm hover:bg-sidebar-accent cursor-pointer"
+              className={cn(
+                "flex h-5 w-5 items-center justify-center rounded-sm transition-opacity hover:bg-sidebar-accent cursor-pointer",
+                p.favorite ? "opacity-100" : "opacity-0 group-hover/project:opacity-100"
+              )}
             >
-              <Star
-                className={cn(
-                  "h-3 w-3",
-                  p.favorite
-                    ? "fill-yellow-400 text-yellow-400"
-                    : "text-sidebar-foreground/50"
-                )}
-              />
+              <OverlordStar active={p.favorite} />
             </span>
           </TooltipTrigger>
           <TooltipContent side="right" className="text-xs">
-            {p.favorite ? "Retirer des favoris" : "Favori"}
+            {p.favorite ? "Remove from favorites" : "Favorite"}
           </TooltipContent>
         </Tooltip>
       </div>
@@ -172,16 +211,18 @@ export function ProjectSidebar({
   return (
     <Sidebar>
       <SidebarHeader>
-        <div className="flex items-center justify-between">
-          <h1 className="text-[11px] font-bold tracking-[3px] text-primary">
+        <div className="flex items-center gap-2">
+          <img
+            src="/favicons/favicon-128.png"
+            alt=""
+            className="h-8 w-8 shrink-0"
+          />
+          <h1 className="font-['Montserrat'] text-[14px] font-semibold tracking-[3px] text-primary">
             OVERLORD
           </h1>
-          <span className="text-[10px] text-muted-foreground">
-            {projects.filter((p) => !p.hidden).length}
-          </span>
         </div>
         <SidebarInput
-          placeholder="Rechercher..."
+          placeholder="Search..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -190,21 +231,25 @@ export function ProjectSidebar({
       <SidebarContent>
         {favorites.length > 0 && (
           <SidebarGroup>
-            <SidebarGroupLabel>Favoris</SidebarGroupLabel>
+          <SidebarGroupLabel>
+            Favorites <span className="ml-1 text-muted-foreground">({favorites.length})</span>
+          </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>{favorites.map(renderProject)}</SidebarMenu>
+              <SidebarMenu className="gap-1">{favorites.map(renderProject)}</SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         )}
 
         <SidebarGroup>
-          <SidebarGroupLabel>Projets</SidebarGroupLabel>
+          <SidebarGroupLabel>
+            Projects <span className="ml-1 text-muted-foreground">({visibleProjectCount})</span>
+          </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1">
               {others.map(renderProject)}
               {filtered.length === 0 && (
                 <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-                  Aucun projet trouve
+                  No projects found
                 </p>
               )}
             </SidebarMenu>
@@ -214,74 +259,101 @@ export function ProjectSidebar({
 
       <SidebarFooter className="gap-2">
         {/* New project inline form */}
-        {creating ? (
+        {creating && (
           <div className="flex flex-col gap-1.5">
-            <Input
-              autoFocus
-              placeholder="my-new-project"
-              value={newProjectName}
-              onChange={(e) => { setNewProjectName(e.target.value); setCreateError(null); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreateProject();
-                if (e.key === "Escape") { setCreating(false); setNewProjectName(""); setCreateError(null); }
-              }}
-              className="h-7 text-xs"
-            />
-            {createError && (
-              <p className="text-[10px] text-destructive">{createError}</p>
-            )}
-            <div className="flex gap-1">
+            <div className="flex items-center gap-1">
+              <Input
+                autoFocus
+                placeholder="my-new-project"
+                value={newProjectName}
+                onChange={(e) => { setNewProjectName(e.target.value); setCreateError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateProject();
+                  if (e.key === "Escape") { setCreating(false); setNewProjectName(""); setCreateError(null); }
+                }}
+                className="h-7 min-w-0 flex-1 text-xs"
+              />
               <Button
-                size="sm"
-                className="flex-1 h-6 text-[11px]"
+                size="icon-sm"
+                className="h-7 w-7 shrink-0"
                 onClick={handleCreateProject}
                 disabled={!newProjectName.trim()}
               >
-                <Check className="h-3 w-3 mr-1" /> Create
+                <Check className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="ghost"
-                size="sm"
-                className="h-6 text-[11px]"
+                size="icon-sm"
+                className="h-7 w-7 shrink-0"
                 onClick={() => { setCreating(false); setNewProjectName(""); setCreateError(null); }}
               >
-                <X className="h-3 w-3" />
+                <X className="h-3.5 w-3.5" />
               </Button>
             </div>
+            {createError && (
+              <p className="text-[10px] text-destructive">{createError}</p>
+            )}
           </div>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => setCreating(true)}
-          >
-            <FolderPlus className="mr-2 h-3 w-3" />
-            Nouveau projet
-          </Button>
         )}
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full text-xs text-muted-foreground"
-          onClick={() => setShowHidden((v) => !v)}
-        >
-          {showHidden ? (
-            <Eye className="mr-2 h-3 w-3" />
-          ) : (
-            <EyeOff className="mr-2 h-3 w-3" />
-          )}
-          {showHidden ? "Masquer les caches" : "Afficher les caches"}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full text-xs text-muted-foreground"
-          onClick={onScan}
-        >
-          Scanner les projets
-        </Button>
+        <div className="grid grid-cols-3 divide-x divide-sidebar-border overflow-hidden rounded-lg border border-sidebar-border bg-sidebar-accent/30">
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-8 w-full rounded-none border-0 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                onClick={() => setCreating(true)}
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              New project
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-8 w-full rounded-none border-0 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                onClick={() => setShowHidden((v) => !v)}
+              >
+                {showHidden ? (
+                  <Eye className="h-3.5 w-3.5" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              {showHidden ? "Hide hidden projects" : "Show hidden projects"}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-8 w-full rounded-none border-0 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                onClick={handleScan}
+                disabled={scanning}
+              >
+                {scanning ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FolderSearch className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              {scanning ? "Scanning..." : "Scan projects"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </SidebarFooter>
     </Sidebar>
   );

@@ -73,7 +73,7 @@ export function TodosTab({ project, onSendToChat }: Props) {
       {/* Header + Add button */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">
-          Todos ({pending.length} en cours)
+          Todos ({pending.length} pending)
         </h3>
         <Button
           size="sm"
@@ -82,7 +82,7 @@ export function TodosTab({ project, onSendToChat }: Props) {
           onClick={() => setShowForm((v) => !v)}
         >
           <Plus className="h-3 w-3" />
-          Ajouter
+          Add
         </Button>
       </div>
 
@@ -91,14 +91,14 @@ export function TodosTab({ project, onSendToChat }: Props) {
         <Card>
           <CardContent className="pt-4 flex flex-col gap-3">
             <Input
-              placeholder="Titre de la tache..."
+              placeholder="Task title..."
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={handleKeyDown}
               autoFocus
             />
             <Textarea
-              placeholder="Description / details (optionnel)..."
+              placeholder="Description / details (optional)..."
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               className="min-h-[80px] resize-none"
@@ -109,14 +109,14 @@ export function TodosTab({ project, onSendToChat }: Props) {
                 variant="ghost"
                 onClick={() => setShowForm(false)}
               >
-                Annuler
+                Cancel
               </Button>
               <Button
                 size="sm"
                 onClick={handleAdd}
                 disabled={!newTitle.trim()}
               >
-                Ajouter
+                Add
               </Button>
             </div>
           </CardContent>
@@ -126,7 +126,7 @@ export function TodosTab({ project, onSendToChat }: Props) {
       {/* Pending todos */}
       {pending.length === 0 && !showForm && (
         <p className="text-sm italic text-muted-foreground py-8 text-center">
-          Aucune tache. Ajoute des idees et des todos pour ce projet.
+          No tasks. Add ideas and todos for this project.
         </p>
       )}
 
@@ -158,10 +158,10 @@ export function TodosTab({ project, onSendToChat }: Props) {
                 variant="default"
                 className="h-7 gap-1.5 px-2.5 text-xs"
                 onClick={() => handleLaunch(todo)}
-                title="Envoyer dans le chat"
+                title="Send to chat"
               >
                 <Play className="h-3 w-3" />
-                Lancer
+                Start
               </Button>
               <Button
                 size="sm"
@@ -180,7 +180,7 @@ export function TodosTab({ project, onSendToChat }: Props) {
       {done.length > 0 && (
         <>
           <h4 className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Termine ({done.length})
+            Done ({done.length})
           </h4>
           {done.map((todo) => (
             <Card key={todo.id} className="opacity-50">

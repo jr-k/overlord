@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Square, Copy, Check, ArrowDown, Undo2, Plus } from "lucide-react";
+import { Square, Copy, Check, ArrowDown, Undo2, Plus, SendHorizontal } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolUseCard } from "./ToolUseCard.js";
@@ -161,7 +161,7 @@ function PastedBadge({ block }: { block: PastedBlock }) {
       onMouseEnter={() => setShowPreview(true)}
       onMouseLeave={() => setShowPreview(false)}
     >
-      [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
+      [{block.lineCount} copied line{block.lineCount > 1 ? "s" : ""}]
       {showPreview && (
         <div className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg z-50 font-mono whitespace-pre-wrap">
           {block.content.slice(0, 2000)}
@@ -203,7 +203,7 @@ function AddToTodoButton({ content, projectId }: { content: string; projectId: n
         </span>
       </TooltipTrigger>
       <TooltipContent side="left" className="text-xs">
-        Ajouter aux todos
+        Add to todos
       </TooltipContent>
     </Tooltip>
   );
@@ -260,13 +260,13 @@ const UserMessage = React.memo(function UserMessage({
               onClick={() => handleRollback(true)}
               className="rounded bg-destructive px-2 py-1 text-[11px] text-white hover:bg-destructive/80"
             >
-              Rollback quand meme
+              Roll back anyway
             </button>
             <button
               onClick={() => setConfirmNeeded(null)}
               className="rounded bg-secondary px-2 py-1 text-[11px] hover:bg-secondary/80"
             >
-              Annuler
+              Cancel
             </button>
           </div>
         </div>
@@ -279,13 +279,13 @@ const UserMessage = React.memo(function UserMessage({
             onClick={() => handleRollback()}
             disabled={rolling}
             className="absolute -left-8 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-md opacity-0 group-hover/user:opacity-100 transition-opacity hover:bg-secondary"
-            title="Rollback: restaurer le code et remettre le message dans l'input"
+            title="Rollback: restore the code and put the message back into the input"
           >
             <Undo2 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
         )}
         <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
-          Toi
+          You
         </div>
         <div className="text-sm leading-relaxed select-text">
           {entry.displayContent ? (
@@ -339,7 +339,7 @@ const MessageBubble = React.memo(function MessageBubble({ content, projectId }: 
                 )}
               </span>
             </TooltipTrigger>
-            <TooltipContent side="left" className="text-xs">Copier le markdown</TooltipContent>
+            <TooltipContent side="left" className="text-xs">Copy markdown</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -806,9 +806,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
         // Desktop notification
         if (document.hidden && Notification.permission === "granted") {
-          new Notification(`Overlord — ${project.name}`, {
-            body: "Claude a termine son travail.",
-            icon: "/favicon.ico",
+          new Notification(`Overlord - ${project.name}`, {
+            body: "Claude has finished its work.",
+            icon: "/favicons/favicon-128.png",
           });
         }
 
@@ -1013,9 +1013,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
   const isWorking = agentStatus === "waiting" || agentStatus === "running";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-3 min-w-0">
           <span className="font-mono text-sm text-primary">
             claude @ {project.name}
@@ -1024,10 +1024,10 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             <Badge
               variant="outline"
               className="gap-1.5 text-[10px] border-purple-400/40 text-purple-400 animate-pulse"
-              title="L'agent analyse cette session pour en tirer des apprentissages"
+              title="The agent is analyzing this session to extract learnings"
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-purple-400" />
-              Analyse de la session...
+              Analyzing session...
             </Badge>
           )}
           {channel === "chat" && (
@@ -1041,10 +1041,10 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               )}
               title={
                 codegraphStatus.indexing
-                  ? "CodeGraph est en train d'indexer le projet"
+                  ? "CodeGraph is indexing the project"
                   : codegraphStatus.indexed
-                    ? "CodeGraph indexed — Claude utilise un index sémantique pour explorer le code"
-                    : "CodeGraph non indexé — clique sur 'Indexer' pour activer"
+                    ? "CodeGraph indexed — Claude uses a semantic index to explore the code"
+                    : "CodeGraph not indexed — click 'Index' to enable"
               }
             >
               <span className={cn(
@@ -1053,7 +1053,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                 !codegraphStatus.indexing && codegraphStatus.indexed && "bg-emerald-400",
                 !codegraphStatus.indexing && !codegraphStatus.indexed && "bg-zinc-400"
               )} />
-              {codegraphStatus.indexing ? "Indexation..." : codegraphStatus.indexed ? "Indexed" : "Not indexed"}
+              {codegraphStatus.indexing ? "Indexing..." : codegraphStatus.indexed ? "Indexed" : "Not indexed"}
             </Badge>
           )}
         </div>
@@ -1104,23 +1104,23 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
                 <div className="space-y-1.5 font-sans">
-                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong> — tokens envoyes a Claude (votre message + contexte projet)</p>
-                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong> — tokens generes par Claude (sa reponse)</p>
+                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong> — tokens sent to Claude (your message + project context)</p>
+                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong> — tokens generated by Claude (its response)</p>
                   {tokenStats.cacheReadTokens > 0 && (
-                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong> — tokens lus depuis le cache au lieu d'etre re-traites (economie de cout)</p>
+                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong> — tokens read from cache instead of being reprocessed (cost savings)</p>
                   )}
-                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cout API cumule de cette session ({tokenStats.turns} echange{tokenStats.turns > 1 ? "s" : ""})</p>
+                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cumulative API cost for this session ({tokenStats.turns} exchange{tokenStats.turns > 1 ? "s" : ""})</p>
                   {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
-                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens economises par RTK sur {rtkSavings.total_commands} commandes shell (compresse git status, ls, etc.)</p>
+                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens saved by RTK across {rtkSavings.total_commands} shell commands (compresses git status, ls, etc.)</p>
                   )}
                   {codegraphStatus.indexed && (
                     <div className="border-t border-border/50 pt-1.5 mt-1.5">
-                      <p><strong className="text-cyan-400">Codegraph</strong> — {codegraphStats.totalCalls} appel{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
+                      <p><strong className="text-cyan-400">Codegraph</strong> — {codegraphStats.totalCalls} call{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
                       {codegraphStats.totalCalls > 0 ? (
                         <>
-                          <p className="text-muted-foreground">Consomme: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (resultats lus par Claude)</p>
-                          <p className="text-muted-foreground">Estime epargne: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs Read/Grep equivalents</p>
-                          <p className="text-[10px] italic opacity-60 mt-1">Heuristique arbitraire (8k/context, 5k/callers, 3k/search, 0.5k/files). Ratio epargne/consomme = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "—"}x.</p>
+                          <p className="text-muted-foreground">Consumed: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (results read by Claude)</p>
+                          <p className="text-muted-foreground">Estimated savings: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs equivalent Read/Grep calls</p>
+                          <p className="text-[10px] italic opacity-60 mt-1">Rough heuristic (8k/context, 5k/callers, 3k/search, 0.5k/files). Saved/consumed ratio = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "—"}x.</p>
                           <div className="mt-1 space-y-0.5">
                             {Object.entries(codegraphStats.perTool).map(([tool, s]) => (
                               <p key={tool} className="text-[10px] text-muted-foreground font-mono">
@@ -1131,7 +1131,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                         </>
                       ) : (
                         <p className="text-[10px] italic opacity-60 mt-1">
-                          MCP active mais Claude ne l'a pas appele. Mentionne-le dans ton message ("utilise codegraph...") ou ajoute une nudge dans le system prompt projet.
+                          MCP is active but Claude did not call it. Mention it in your message ("use codegraph...") or add a nudge to the project system prompt.
                         </p>
                       )}
                     </div>
@@ -1146,7 +1146,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               connected ? "text-green-400" : "text-red-400"
             )}
           >
-            {connected ? "connecte" : "deconnecte"}
+            {connected ? "connected" : "disconnected"}
           </span>
         </div>
       </div>
@@ -1162,8 +1162,8 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           )}
         >
           {agentStatus === "waiting"
-            ? `Claude demarre... (${formatElapsed(elapsed)})`
-            : `Claude travaille... (${formatElapsed(elapsed)})`}
+            ? `Claude is starting... (${formatElapsed(elapsed)})`
+            : `Claude is working... (${formatElapsed(elapsed)})`}
         </div>
       )}
 
@@ -1178,17 +1178,17 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               disabled={loadingOlder}
               className="text-xs text-muted-foreground"
             >
-              {loadingOlder ? "Chargement..." : `Charger les messages precedents (${firstLoadedIndex} restants)`}
+              {loadingOlder ? "Loading..." : `Load previous messages (${firstLoadedIndex} remaining)`}
             </Button>
           </div>
         )}
         {entries.length === 0 && !streamingText && agentStatus === "idle" && (
           <p className="text-center text-sm text-muted-foreground py-12">
-            Demarrer une conversation avec Claude sur{" "}
+            Start a conversation with Claude about{" "}
             <strong className="text-foreground">{project.name}</strong>
             <br />
             <span className="text-xs mt-1 inline-block">
-              Tape <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-mono">/</kbd> pour les commandes
+              Type <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-mono">/</kbd> for commands
             </span>
           </p>
         )}
@@ -1244,31 +1244,31 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
               <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
               <span className="ml-2 text-[11px] text-muted-foreground">
-                {agentStatus === "waiting" ? `Démarrage... ${formatElapsed(elapsed)}` : `${formatElapsed(elapsed)}`}
+                {agentStatus === "waiting" ? `Starting... ${formatElapsed(elapsed)}` : `${formatElapsed(elapsed)}`}
               </span>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Scroll to bottom button */}
-      {showScrollBtn && (
-        <div className="flex justify-center -mt-10 relative z-10 pointer-events-none">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-7 gap-1.5 rounded-full px-3 text-xs shadow-lg pointer-events-auto border border-border"
-            onClick={scrollToBottom}
-          >
-            <ArrowDown className="h-3 w-3" />
-            Dernier message
-          </Button>
-        </div>
-      )}
+        {/* Scroll to bottom button */}
+        {showScrollBtn && (
+          <div className="sticky bottom-2 z-10 flex justify-center pointer-events-none">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 gap-1.5 rounded-full px-3 text-xs shadow-lg pointer-events-auto border border-border"
+              onClick={scrollToBottom}
+            >
+              <ArrowDown className="h-3 w-3" />
+              Latest message
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* Workspace scope selector */}
       {workspacePackages.length > 0 && (
-        <div className="flex items-center gap-1.5 border-t border-border px-5 py-1.5 overflow-x-auto scrollbar-visible">
+        <div className="flex shrink-0 items-center gap-1.5 border-t border-border px-5 py-1.5 overflow-x-auto scrollbar-visible">
           <span className="text-[10px] text-muted-foreground shrink-0 mr-1">Scope:</span>
           {workspacePackages.map((pkg) => (
             <button
@@ -1296,7 +1296,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       )}
 
       {/* Input area */}
-      <div className="relative border-t border-border bg-card p-4">
+      <div className="relative shrink-0 border-t border-border bg-card p-4">
         {showSlash && filteredCommands.length > 0 && (
           <div className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg scrollbar-visible">
             {filteredCommands.map((cmd, i) => (
@@ -1323,9 +1323,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         {channel === "chat" && !codegraphStatus.indexed && !codegraphStatus.indexing && (
           <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-xs">
             <div className="flex flex-col gap-0.5">
-              <span className="text-emerald-400 font-medium">Activer CodeGraph</span>
+              <span className="text-emerald-400 font-medium">Enable CodeGraph</span>
               <span className="text-muted-foreground text-[10px]">
-                Index sémantique du code, -94% de tool calls pour Claude
+                Semantic code index, -94% tool calls for Claude
               </span>
             </div>
             <Button
@@ -1334,7 +1334,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               className="text-xs gap-1.5 shrink-0"
               onClick={handleIndexCodegraph}
             >
-              Indexer
+              Index
             </Button>
           </div>
         )}
@@ -1345,18 +1345,18 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-[10px] font-bold text-primary">
               {messageQueue.length}
             </span>
-            <span>message{messageQueue.length > 1 ? "s" : ""} en attente</span>
+            <span>queued message{messageQueue.length > 1 ? "s" : ""}</span>
             <button
               onClick={() => setMessageQueue([])}
               className="ml-auto text-[10px] text-muted-foreground hover:text-destructive"
             >
-              Vider la file
+              Clear queue
             </button>
           </div>
         )}
 
         <div
-          className="flex items-stretch gap-2"
+          className="relative flex items-stretch"
           style={{ minHeight: "12vh", maxHeight: "20vh" }}
         >
           <RichPasteInput
@@ -1395,31 +1395,49 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             }}
             placeholder={
               isWorking
-                ? `Taper un message (sera envoye quand Claude aura fini)...`
-                : `Message ou / pour les commandes...`
+                ? `Type a message (it will be sent when Claude is done)...`
+                : `Message or / for commands...`
             }
             disabled={!connected}
-            className={cn(isWorking ? "border-yellow-400/30" : "border-border")}
-          />
-          <div className="flex flex-col justify-end gap-1.5">
-            {isWorking && (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="gap-1.5"
-                onClick={handleStop}
-              >
-                <Square className="h-3 w-3" />
-                Stop
-              </Button>
+            className={cn(
+              "pb-12 pr-16",
+              isWorking ? "border-yellow-400/30" : "border-border"
             )}
-            <Button
-              onClick={handleSend}
-              disabled={!connected || (!input.trim() && pastedBlocks.length === 0 && fileBlocks.length === 0)}
-              variant={isWorking ? "secondary" : "default"}
-            >
-              {isWorking ? `En file (${messageQueue.length + 1})` : "Envoyer"}
-            </Button>
+          />
+          <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5">
+            {isWorking && (
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon-sm"
+                    onClick={handleStop}
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  Stop
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!connected || (!input.trim() && pastedBlocks.length === 0 && fileBlocks.length === 0)}
+                  variant={isWorking ? "secondary" : "default"}
+                  size="icon-sm"
+                >
+                  <SendHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                {isWorking ? `Add to queue (${messageQueue.length + 1})` : "Send"}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>

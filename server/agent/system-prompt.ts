@@ -2,7 +2,7 @@ import { isIndexed as isCodegraphIndexed } from "../routes/codegraph.js";
 import { buildMarketingSystemPrompt } from "./marketing-prompt.js";
 import type { Channel } from "./types.js";
 
-export const DEFAULT_CHAT_PROMPT = "Match the language of the user's message in your response. When you respond in French, always use proper accents (é, è, ê, à, â, ù, û, ç, ô, etc.) — never write French without accents.";
+export const DEFAULT_CHAT_PROMPT = "Match the language of the user's message in your response. When you respond in French, always use proper French accents.";
 
 export const CODEGRAPH_NUDGE = `
 

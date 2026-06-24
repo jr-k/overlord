@@ -101,14 +101,14 @@ app.patch("/:id", async (c) => {
       // Check if another project already uses this path in DB
       const otherProject = db.select().from(projects).where(eq(projects.path, newPath)).get();
       if (otherProject && otherProject.id !== id) {
-        return c.json({ error: "Un autre projet utilise déjà ce chemin" }, 409);
+        return c.json({ error: "Another project already uses this path" }, 409);
       }
 
       const newPathExists = existsSync(newPath);
       const oldPathExists = existsSync(oldPath);
 
       if (newPathExists) {
-        return c.json({ error: `Un dossier existe déjà à cet emplacement: ${newPath}` }, 409);
+        return c.json({ error: `A folder already exists at this location: ${newPath}` }, 409);
       }
 
       try {
@@ -121,7 +121,7 @@ app.patch("/:id", async (c) => {
           mkdirSync(newPath, { recursive: true });
         }
       } catch (err) {
-        return c.json({ error: `Échec du déplacement: ${err}` }, 500);
+        return c.json({ error: `Move failed: ${err}` }, 500);
       }
 
       body.path = newPath;
@@ -295,7 +295,7 @@ app.delete("/:id", async (c) => {
 
     return c.json({ ok: true, deletedFolder: deleteFolder });
   } catch (err) {
-    return c.json({ error: `Échec de la suppression: ${err}` }, 500);
+    return c.json({ error: `Deletion failed: ${err}` }, 500);
   }
 });
 

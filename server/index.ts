@@ -49,23 +49,65 @@ app.route("/api/learnings", learningsRoutes);
 app.route("/api/codegraph", codegraphRoutes);
 app.route("/api/uploads", uploadsRoutes);
 
+type TerminalConfig =
+  | { id: string; name: string; platform: "darwin"; app: string }
+  | { id: string; name: string; platform: "linux"; cmd: string; args: (dir: string) => string[] }
+  | { id: string; name: string; platform: "win32"; cmd: string };
+
+const TERMINALS: TerminalConfig[] = [
+  { id: "terminal", name: "Terminal", platform: "darwin", app: "Terminal" },
+  { id: "iterm2", name: "iTerm2", platform: "darwin", app: "iTerm" },
+  { id: "warp", name: "Warp", platform: "darwin", app: "Warp" },
+  { id: "gnome-terminal", name: "GNOME Terminal", platform: "linux", cmd: "gnome-terminal", args: (dir: string) => ["--working-directory", dir] },
+  { id: "konsole", name: "Konsole", platform: "linux", cmd: "konsole", args: (dir: string) => ["--workdir", dir] },
+  { id: "xfce4-terminal", name: "Xfce Terminal", platform: "linux", cmd: "xfce4-terminal", args: (dir: string) => ["--working-directory", dir] },
+  { id: "xterm", name: "xterm", platform: "linux", cmd: "xterm", args: (dir: string) => ["-e", `cd ${JSON.stringify(dir)} && exec $SHELL`] },
+  { id: "cmd", name: "Command Prompt", platform: "win32", cmd: "cmd" },
+];
+
+function hasDarwinApp(appName: string) {
+  try {
+    execSync(`osascript -e 'id of app "${appName}"'`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getAvailableTerminals() {
+  const platform = process.platform;
+  return TERMINALS.filter((terminal) => {
+    if (terminal.platform !== platform) return false;
+    if ("app" in terminal) return hasDarwinApp(terminal.app);
+    if (!("cmd" in terminal) || terminal.cmd === "cmd") return true;
+    try {
+      execSync(`which ${terminal.cmd}`, { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+app.get("/api/terminals", (c) => {
+  return c.json(getAvailableTerminals().map(({ id, name }) => ({ id, name })));
+});
+
 app.post("/api/terminal/open", async (c) => {
   const body = await c.req.json();
   const dir = body.path;
   if (!dir) return c.json({ error: "Path required" }, 400);
 
-  const platform = process.platform;
-  if (platform === "darwin") {
-    spawn("open", ["-a", "Terminal", dir], { detached: true, stdio: "ignore" });
-  } else if (platform === "linux") {
-    for (const term of ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"]) {
-      try {
-        spawn(term, ["--working-directory", dir], { detached: true, stdio: "ignore" });
-        break;
-      } catch { continue; }
-    }
-  } else if (platform === "win32") {
+  const available = getAvailableTerminals();
+  const terminalConfig = available.find((terminal) => terminal.id === body.terminal) ?? available[0];
+  if (!terminalConfig) return c.json({ error: "No terminal found" }, 404);
+
+  if (terminalConfig.platform === "darwin") {
+    spawn("open", ["-a", terminalConfig.app, dir], { detached: true, stdio: "ignore" });
+  } else if (terminalConfig.platform === "win32") {
     spawn("cmd", ["/c", "start", "cmd", "/K", `cd /d ${dir}`], { detached: true, stdio: "ignore" });
+  } else {
+    spawn(terminalConfig.cmd, terminalConfig.args(dir), { detached: true, stdio: "ignore" });
   }
 
   return c.json({ ok: true });

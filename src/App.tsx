@@ -8,8 +8,8 @@ import { SettingsTab } from "./components/SettingsTab.js";
 import { MarketingTab } from "./components/MarketingTab.js";
 import { SkillsTab } from "./components/SkillsTab.js";
 import { OpenInEditorButton } from "./components/OpenInEditorButton.js";
+import { OpenTerminalButton } from "./components/OpenTerminalButton.js";
 import { TodosTab } from "./components/TodosTab.js";
-import { TerminalTab } from "./components/TerminalTab.js";
 import { WorkspacesTab } from "./components/WorkspacesTab.js";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,10 +19,35 @@ import { ExternalLink } from "lucide-react";
 
 export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
+const VISIBLE_TABS = ["chat", "todos", "marketing", "skills", "summary", "settings"] as const;
+type VisibleTab = typeof VISIBLE_TABS[number];
+
+function normalizeTab(value: string | null | undefined): VisibleTab {
+  return VISIBLE_TABS.includes(value as VisibleTab) ? (value as VisibleTab) : "chat";
+}
+
+function readRouteFromPathname() {
+  const [projectSegment, tabSegment] = window.location.pathname
+    .split("/")
+    .filter(Boolean);
+
+  return {
+    projectName: projectSegment ? decodeURIComponent(projectSegment) : null,
+    tab: normalizeTab(tabSegment),
+  };
+}
+
+function getProjectRoute(project: Project, tab: string) {
+  return `/${encodeURIComponent(project.name)}/${normalizeTab(tab)}`;
+}
+
 export function App() {
-  const { data: projects, refetch } = useApi<Project[]>("/projects");
+  const { data: projects, refetch } = useApi<Project[]>("/projects?hidden=true");
   const [selected, setSelected] = useState<Project | null>(null);
-  const [tab, setTab] = useState(() => localStorage.getItem("overlord:tab") ?? "chat");
+  const [tab, setTab] = useState<string>(() => {
+    const route = readRouteFromPathname();
+    return route.projectName ? route.tab : normalizeTab(localStorage.getItem("overlord:tab"));
+  });
   const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem("overlord:chatInputs") ?? "{}");
@@ -44,9 +69,20 @@ export function App() {
   });
   const statusWsRef = useRef<WebSocket | null>(null);
 
-  // Restore selected project from localStorage when projects load
+  // Restore selected project from URL first, then localStorage.
   useEffect(() => {
     if (restored || !projects?.length) return;
+    const route = readRouteFromPathname();
+    if (route.projectName) {
+      const found = projects.find((p) => p.name === route.projectName);
+      if (found) {
+        setSelected(found);
+        setTab(route.tab);
+        setRestored(true);
+        return;
+      }
+    }
+
     const savedId = localStorage.getItem("overlord:projectId");
     if (savedId) {
       const found = projects.find((p) => p.id === Number(savedId));
@@ -54,6 +90,24 @@ export function App() {
     }
     setRestored(true);
   }, [projects, restored]);
+
+  useEffect(() => {
+    if (!projects?.length) return;
+
+    const handlePopState = () => {
+      const route = readRouteFromPathname();
+      if (!route.projectName) return;
+
+      const found = projects.find((p) => p.name === route.projectName);
+      if (!found) return;
+
+      setSelected(found);
+      setTab(route.tab);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [projects]);
 
   // Persist selected project + fetch remote URL
   useEffect(() => {
@@ -72,6 +126,15 @@ export function App() {
   useEffect(() => {
     localStorage.setItem("overlord:tab", tab);
   }, [tab]);
+
+  useEffect(() => {
+    if (!restored || !selected) return;
+
+    const nextPath = getProjectRoute(selected, tab);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, "", nextPath);
+    }
+  }, [restored, selected, tab]);
 
   // Persist chat inputs (debounced to not lag the input during typing)
   useEffect(() => {
@@ -140,10 +203,9 @@ export function App() {
 
   const handleSelect = useCallback((p: Project) => {
     setSelected(p);
-    setTab("chat");
   }, []);
 
-  // "Lancer" from Todos: put text in chat input and switch to chat tab
+  // "Start" from Todos: put text in chat input and switch to chat tab
   const handleSendToChat = useCallback(
     (message: string) => {
       if (!selected) return;
@@ -184,8 +246,8 @@ export function App() {
           {selected ? (
             <div className="flex flex-1 flex-col overflow-hidden">
               <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-                <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="mr-2 !h-4" />
+                <SidebarTrigger className="-ml-2" />
+                <Separator orientation="vertical" className="mr-2" />
                 <h2 className="flex-1 flex items-center gap-2 text-sm font-semibold">
                   {selected.name}
                   {remoteUrl && (
@@ -205,6 +267,7 @@ export function App() {
                     </Tooltip>
                   )}
                   <OpenInEditorButton path={selected.path} />
+                  <OpenTerminalButton path={selected.path} />
                 </h2>
                 <Tabs value={tab} onValueChange={setTab}>
                   <TabsList>
@@ -212,9 +275,7 @@ export function App() {
                     <TabsTrigger value="todos">Todos</TabsTrigger>
                     <TabsTrigger value="marketing">Marketing</TabsTrigger>
                     <TabsTrigger value="skills">Skills</TabsTrigger>
-                    <TabsTrigger value="workspaces">Workspaces</TabsTrigger>
-                    <TabsTrigger value="summary">Resume</TabsTrigger>
-                    <TabsTrigger value="terminal">Terminal</TabsTrigger>
+                    <TabsTrigger value="summary">Summary</TabsTrigger>
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -259,11 +320,6 @@ export function App() {
                     <WorkspacesTab project={selected} />
                   </div>
                 )}
-                {tab === "terminal" && (
-                  <div className="h-full">
-                    <TerminalTab project={selected} />
-                  </div>
-                )}
                 {tab === "chat" && (
                   <ChatTab
                     key={selected.id}
@@ -283,7 +339,7 @@ export function App() {
                 Overlord
               </h2>
               <p className="text-sm text-muted-foreground">
-                Selectionne un projet ou scanne le repertoire.
+                Select a project or scan the directory.
               </p>
             </div>
           )}

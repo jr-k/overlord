@@ -25,14 +25,14 @@ const ASK_USER_QUESTION = "AskUserQuestion";
 
 const TOOL_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string }> = {
   AskUserQuestion: { icon: HelpCircle, label: "Questions",     color: "text-primary" },
-  Read:       { icon: Eye,          label: "Lecture",       color: "text-blue-400" },
-  Edit:       { icon: Pencil,       label: "Edition",       color: "text-amber-400" },
-  Write:      { icon: FilePlus,     label: "Ecriture",      color: "text-green-400" },
-  Bash:       { icon: Terminal,     label: "Commande",      color: "text-purple-400" },
-  Glob:       { icon: FolderSearch, label: "Recherche",     color: "text-cyan-400" },
-  Grep:       { icon: Search,       label: "Recherche",     color: "text-cyan-400" },
+  Read:       { icon: Eye,          label: "Read",          color: "text-blue-400" },
+  Edit:       { icon: Pencil,       label: "Edit",          color: "text-amber-400" },
+  Write:      { icon: FilePlus,     label: "Write",         color: "text-green-400" },
+  Bash:       { icon: Terminal,     label: "Command",       color: "text-purple-400" },
+  Glob:       { icon: FolderSearch, label: "Search",        color: "text-cyan-400" },
+  Grep:       { icon: Search,       label: "Search",        color: "text-cyan-400" },
   WebFetch:   { icon: Globe,        label: "Web",           color: "text-pink-400" },
-  WebSearch:  { icon: Globe,        label: "Recherche web", color: "text-pink-400" },
+  WebSearch:  { icon: Globe,        label: "Web search",    color: "text-pink-400" },
 };
 
 function getToolInfo(name: string) {
@@ -137,7 +137,7 @@ function EditorButton({ filePath }: { filePath: string }) {
           setShowPicker(true);
         }}
         className="flex h-5 w-5 items-center justify-center rounded hover:bg-secondary cursor-pointer"
-        title={preferred ? `Ouvrir dans ${editors.find((e) => e.id === preferred)?.name ?? preferred}` : "Ouvrir dans l'editeur"}
+        title={preferred ? `Open in ${editors.find((e) => e.id === preferred)?.name ?? preferred}` : "Open in editor"}
       >
         <ExternalLink className="h-3 w-3 text-muted-foreground" />
       </span>
@@ -156,11 +156,11 @@ function EditorButton({ filePath }: { filePath: string }) {
                 )}
               >
                 {ed.name}
-                {preferred === ed.id && <span className="ml-auto text-[10px] text-muted-foreground">defaut</span>}
+                {preferred === ed.id && <span className="ml-auto text-[10px] text-muted-foreground">default</span>}
               </button>
             ))}
             <div className="border-t border-border mt-1 pt-1 px-2 py-1 text-[10px] text-muted-foreground">
-              Clic droit pour changer
+              Right-click to change
             </div>
           </div>
         </>
@@ -289,7 +289,7 @@ function QuestionsForm({
     const formatted = questions
       .map((q, i) => {
         const answer = getCombinedAnswer(i);
-        return `Q: ${q.question}\nA: ${answer || "(pas de reponse)"}`;
+        return `Q: ${q.question}\nA: ${answer || "(no answer)"}`;
       })
       .join("\n\n");
     onSubmit(formatted);
@@ -305,7 +305,7 @@ function QuestionsForm({
   if (submitted) {
     return (
       <div className="p-3 text-xs text-muted-foreground italic">
-        Réponses envoyées.
+        Answers sent.
       </div>
     );
   }
@@ -348,7 +348,7 @@ function QuestionsForm({
                   key={block.id}
                   className="relative inline-flex items-center gap-1 rounded-md bg-secondary border border-border px-2 py-0.5 text-[11px] text-muted-foreground font-mono group/paste"
                 >
-                  [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
+                  [{block.lineCount} copied line{block.lineCount > 1 ? "s" : ""}]
                   <button
                     onClick={() => removeBlock(idx, block.id)}
                     className="text-muted-foreground/50 hover:text-destructive ml-0.5"
@@ -368,7 +368,7 @@ function QuestionsForm({
             value={freeTexts[idx]}
             onChange={(e) => setFreeText(idx, e.target.value)}
             onPaste={(e) => handlePaste(idx, e)}
-            placeholder={q.options?.length ? "Ou écris une réponse libre..." : "Ta réponse..."}
+            placeholder={q.options?.length ? "Or write a free-form answer..." : "Your answer..."}
             className="min-h-[60px] text-xs"
             autoFocus={idx === 0}
           />
@@ -382,7 +382,7 @@ function QuestionsForm({
           className="gap-1.5"
         >
           <Send className="h-3 w-3" />
-          Envoyer les réponses
+          Send answers
         </Button>
       </div>
     </div>

@@ -32,7 +32,7 @@ export const OVERLORD_MCP_TOOLS = [
   "mcp__overlord__overlord_ask_project",
 ];
 
-const DEFAULT_SYSTEM_PROMPT = "Match the language of the user's message in your response. When you respond in French, always use proper accents (é, è, ê, à, â, ù, û, ç, ô, etc.) — never write French without accents.";
+const DEFAULT_SYSTEM_PROMPT = "Match the language of the user's message in your response. When you respond in French, always use proper French accents.";
 
 interface Props {
   project: Project;
@@ -174,7 +174,7 @@ export function SettingsTab({ project }: Props) {
                   )}
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setShowEffective((s) => !s)}>
-                  {showEffective ? "Masquer" : "Afficher"}
+                  {showEffective ? "Hide" : "Show"}
                 </Button>
               </div>
               {effectivePrompt.nudges.length > 0 && (
@@ -200,9 +200,9 @@ export function SettingsTab({ project }: Props) {
       {/* Session analysis */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Analyse de session</CardTitle>
+          <CardTitle className="text-sm">Session analysis</CardTitle>
           <CardDescription className="text-xs">
-            A la fin de chaque conversation chat (≥3 tool uses ou messages), Overlord lance un agent Claude qui analyse la session et extrait les apprentissages (dead ends, missing context, recommandations) — visibles dans l'onglet Summary.
+            {"At the end of each chat conversation (at least 3 tool uses or messages), Overlord starts a Claude agent that analyzes the session and extracts learnings (dead ends, missing context, recommendations), visible in the Summary tab."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -213,11 +213,11 @@ export function SettingsTab({ project }: Props) {
               onChange={(e) => { setLearningsEnabled(e.target.checked); setDirty(true); }}
               className="h-4 w-4 rounded border-border accent-primary"
             />
-            <span>Activer l'analyse automatique apres chaque session</span>
+            <span>Enable automatic analysis after each session</span>
           </label>
           {!learningsEnabled && (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Desactive : les sessions ne seront plus analysees. Ca economise tokens + temps mais tu n'auras plus de retro auto.
+              Disabled: sessions will no longer be analyzed. This saves tokens and time, but you will no longer get automatic feedback.
             </p>
           )}
         </CardContent>
@@ -304,11 +304,11 @@ function DangerZoneCard({ project }: { project: Project }) {
       <CardHeader>
         <CardTitle className="text-sm flex items-center gap-2 text-destructive">
           <AlertTriangle className="h-4 w-4" />
-          Zone dangereuse
+          Danger zone
         </CardTitle>
         <CardDescription className="text-xs">
-          Supprime ce projet d'Overlord et toutes ses donnees (chats, todos, marketing, settings).
-          Optionnellement, supprime aussi le dossier du disque.
+          Delete this project from Overlord and all its data (chats, todos, marketing, settings).
+          Optionally, also delete the folder from disk.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -320,7 +320,7 @@ function DangerZoneCard({ project }: { project: Project }) {
             className="gap-1.5 w-fit"
           >
             <Trash2 className="h-3 w-3" />
-            Supprimer ce projet...
+            Delete this project...
           </Button>
         ) : (
           <div className="flex flex-col gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
@@ -331,13 +331,13 @@ function DangerZoneCard({ project }: { project: Project }) {
                 onChange={(e) => setDeleteFolder(e.target.checked)}
               />
               <span>
-                Supprimer aussi le dossier sur le disque
+                Also delete the folder from disk
                 <span className="text-muted-foreground font-mono ml-1">({project.path})</span>
               </span>
             </label>
             <div className="flex flex-col gap-1">
               <label className="text-[11px] text-muted-foreground">
-                Pour confirmer, tape le nom du projet : <strong className="text-foreground">{expected}</strong>
+                To confirm, type the project name: <strong className="text-foreground">{expected}</strong>
               </label>
               <Input
                 value={confirmText}
@@ -354,7 +354,7 @@ function DangerZoneCard({ project }: { project: Project }) {
                 onClick={handleDelete}
                 disabled={!canDelete || deleting}
               >
-                {deleting ? "Suppression..." : deleteFolder ? "Supprimer projet + dossier" : "Supprimer projet"}
+                {deleting ? "Deleting..." : deleteFolder ? "Delete project + folder" : "Delete project"}
               </Button>
               <Button
                 variant="ghost"
@@ -362,7 +362,7 @@ function DangerZoneCard({ project }: { project: Project }) {
                 onClick={() => { setConfirming(false); setConfirmText(""); setError(null); setDeleteFolder(false); }}
                 disabled={deleting}
               >
-                Annuler
+                Cancel
               </Button>
             </div>
           </div>
@@ -420,7 +420,7 @@ function LocationCard({ project }: { project: Project }) {
           Location
         </CardTitle>
         <CardDescription className="text-xs">
-          Renomme ou déplace le dossier du projet. Si le dossier actuel existe, il sera déplacé. Sinon un nouveau dossier sera créé. Erreur si un dossier existe déjà à la nouvelle location.
+          Rename or move the project folder. If the current folder exists, it will be moved. Otherwise, a new folder will be created. An error is shown if a folder already exists at the new location.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
@@ -438,14 +438,14 @@ function LocationCard({ project }: { project: Project }) {
             )}
             <div className="flex gap-2">
               <Button size="sm" onClick={handleSave} disabled={saving || newPath === project.path}>
-                {saving ? "Verification..." : "Mettre à jour"}
+                {saving ? "Checking..." : "Update"}
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => { setEditing(false); setNewPath(project.path); setError(null); }}
               >
-                Annuler
+                Cancel
               </Button>
             </div>
           </>
@@ -453,7 +453,7 @@ function LocationCard({ project }: { project: Project }) {
           <div className="flex items-center justify-between gap-2">
             <code className="font-mono text-xs text-muted-foreground truncate">{project.path}</code>
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              Changer
+              Change
             </Button>
           </div>
         )}
