@@ -96,10 +96,20 @@ The `bin/overlord.js` file is the CLI entry point, while `package.json` defines 
 ## Scripts
 
 ```bash
+# Web build and release
 npm run dev          # Start backend + frontend (hot reload)
 npm run dev:server   # Backend only (with watch)
 npm run dev:client   # Frontend only
 npm run build        # Production build
+
+# Electron build and release
+npm run build:electron       # Build frontend, backend, and Electron entrypoints
+npm run dev:electron         # Build and launch the Electron desktop app
+npm run prepare:electron-package # Prepare the isolated Electron packaging folder
+npm run dist:electron        # Package desktop binaries for the current platform
+npm run dist:electron:mac    # Package macOS binaries
+npm run dist:electron:win    # Package Windows binaries
+npm run dist:electron:linux  # Package Linux binaries
 ```
 
 ## Data Storage
