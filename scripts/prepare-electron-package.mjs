@@ -80,7 +80,7 @@ runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"]);
 execFileSync(
   process.execPath,
   [
-    resolve(rootDir, "node_modules", ".bin", "electron-rebuild"),
+    resolve(rootDir, "node_modules", "@electron", "rebuild", "lib", "cli.js"),
     "-f",
     "-w",
     "better-sqlite3",
