@@ -48,15 +48,18 @@ function readRouteFromPathname() {
   const [projectSegment, tabSegment] = window.location.pathname
     .split("/")
     .filter(Boolean);
+  const decodedProjectSegment = projectSegment ? decodeURIComponent(projectSegment) : null;
+  const idMatch = decodedProjectSegment?.match(/^(\d+)(?:-|$)/);
 
   return {
-    projectName: projectSegment ? decodeURIComponent(projectSegment) : null,
+    projectId: idMatch ? Number(idMatch[1]) : null,
+    projectName: decodedProjectSegment,
     tab: normalizeTab(tabSegment),
   };
 }
 
 function getProjectRoute(project: Project, tab: string) {
-  return `/${encodeURIComponent(project.name)}/${normalizeTab(tab)}`;
+  return `/${encodeURIComponent(`${project.id}-${project.name}`)}/${normalizeTab(tab)}`;
 }
 
 export function App() {
@@ -95,7 +98,9 @@ export function App() {
     if (restored || !projects?.length) return;
     const route = readRouteFromPathname();
     if (route.projectName) {
-      const found = projects.find((p) => p.name === route.projectName);
+      const found = route.projectId
+        ? projects.find((p) => p.id === route.projectId)
+        : projects.find((p) => p.name === route.projectName);
       if (found) {
         setSelected(found);
         setTab(route.tab);
@@ -119,7 +124,9 @@ export function App() {
       const route = readRouteFromPathname();
       if (!route.projectName) return;
 
-      const found = projects.find((p) => p.name === route.projectName);
+      const found = route.projectId
+        ? projects.find((p) => p.id === route.projectId)
+        : projects.find((p) => p.name === route.projectName);
       if (!found) return;
 
       setSelected(found);

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { readFileSync, readdirSync, existsSync, statSync, rmSync } from "fs";
+import { readFileSync, readdirSync, existsSync, statSync, rmSync, realpathSync } from "fs";
 import { dirname, join, relative, resolve, sep } from "path";
 import { homedir } from "os";
 
@@ -142,11 +142,14 @@ app.delete("/:projectId", async (c) => {
     return c.json({ error: "source required" }, 400);
   }
 
-  const sourcePath = resolve(source);
+  const resolvedSource = resolve(source);
+  if (!existsSync(resolvedSource)) return c.json({ error: "not found" }, 404);
+
+  const sourcePath = realpathSync(resolvedSource);
   const allowedBases = [
     resolve(project.path, ".claude"),
     resolve(homedir(), ".claude"),
-  ];
+  ].filter((base) => existsSync(base)).map((base) => realpathSync(base));
   const isAllowed = allowedBases.some((base) => {
     const rel = relative(base, sourcePath);
     return rel && !rel.startsWith("..") && !rel.startsWith(sep);
@@ -156,10 +159,10 @@ app.delete("/:projectId", async (c) => {
   const sourceRel = allowedBases
     .map((base) => relative(base, sourcePath))
     .find((rel) => rel && !rel.startsWith("..") && !rel.startsWith(sep));
-  const isSkill = sourceRel?.startsWith(`skills${sep}`) && sourcePath.endsWith(`${sep}SKILL.md`);
-  const isCommand = sourceRel?.startsWith(`commands${sep}`) && sourcePath.endsWith(".md");
+  const sourceParts = sourceRel?.split(sep) ?? [];
+  const isSkill = sourceParts.length === 3 && sourceParts[0] === "skills" && sourceParts[2] === "SKILL.md";
+  const isCommand = sourceParts.length === 2 && sourceParts[0] === "commands" && sourceParts[1].endsWith(".md");
   if (!isSkill && !isCommand) return c.json({ error: "forbidden" }, 403);
-  if (!existsSync(sourcePath)) return c.json({ error: "not found" }, 404);
 
   const target = isSkill ? dirname(sourcePath) : sourcePath;
   try {

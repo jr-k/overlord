@@ -83,6 +83,10 @@ type TerminalConfig =
   | { id: string; name: string; platform: "linux"; cmd: string; args: (dir: string) => string[] }
   | { id: string; name: string; platform: "win32"; cmd: string };
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 const TERMINALS: TerminalConfig[] = [
   { id: "terminal", name: "Terminal", platform: "darwin", app: "Terminal" },
   { id: "iterm2", name: "iTerm2", platform: "darwin", app: "iTerm" },
@@ -90,7 +94,7 @@ const TERMINALS: TerminalConfig[] = [
   { id: "gnome-terminal", name: "GNOME Terminal", platform: "linux", cmd: "gnome-terminal", args: (dir: string) => ["--working-directory", dir] },
   { id: "konsole", name: "Konsole", platform: "linux", cmd: "konsole", args: (dir: string) => ["--workdir", dir] },
   { id: "xfce4-terminal", name: "Xfce Terminal", platform: "linux", cmd: "xfce4-terminal", args: (dir: string) => ["--working-directory", dir] },
-  { id: "xterm", name: "xterm", platform: "linux", cmd: "xterm", args: (dir: string) => ["-e", `cd ${JSON.stringify(dir)} && exec $SHELL`] },
+  { id: "xterm", name: "xterm", platform: "linux", cmd: "xterm", args: (dir: string) => ["-e", "sh", "-c", `cd ${shellQuote(dir)} && exec "\${SHELL:-sh}"`] },
   { id: "cmd", name: "Command Prompt", platform: "win32", cmd: "cmd" },
 ];
 
@@ -125,7 +129,7 @@ app.get("/api/terminals", (c) => {
 app.post("/api/terminal/open", async (c) => {
   const body = await c.req.json();
   const dir = body.path;
-  if (!dir) return c.json({ error: "Path required" }, 400);
+  if (!dir || typeof dir !== "string") return c.json({ error: "Path required" }, 400);
 
   const available = getAvailableTerminals();
   const terminalConfig = available.find((terminal) => terminal.id === body.terminal) ?? available[0];
@@ -134,7 +138,7 @@ app.post("/api/terminal/open", async (c) => {
   if (terminalConfig.platform === "darwin") {
     spawn("open", ["-a", terminalConfig.app, dir], { detached: true, stdio: "ignore" });
   } else if (terminalConfig.platform === "win32") {
-    spawn("cmd", ["/c", "start", "cmd", "/K", `cd /d ${dir}`], { detached: true, stdio: "ignore" });
+    spawn("cmd", ["/c", "start", "", "/D", dir, "cmd"], { detached: true, stdio: "ignore" });
   } else {
     spawn(terminalConfig.cmd, terminalConfig.args(dir), { detached: true, stdio: "ignore" });
   }
