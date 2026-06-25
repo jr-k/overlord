@@ -38,6 +38,7 @@ const packageJson = {
   name: rootPackage.name,
   version: rootPackage.version,
   description: rootPackage.description,
+  homepage: rootPackage.homepage,
   author: rootPackage.author || "Overlord",
   type: rootPackage.type,
   main: rootPackage.main,

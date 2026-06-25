@@ -1,7 +1,12 @@
 {
   "name": "overlord",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Project multiplexer with Claude integration",
+  "author": {
+    "name": "Overlord",
+    "email": "hello@poptocrack.com"
+  },
+  "homepage": "https://github.com/poptocrack/overlord",
   "type": "module",
   "main": "dist/electron/main.js",
   "bin": {
@@ -132,7 +137,8 @@
         }
       ],
       "icon": "electron/assets",
-      "category": "Development"
+      "category": "Development",
+      "maintainer": "Overlord <hello@poptocrack.com>"
     },
     "appImage": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
@@ -145,7 +151,6 @@
     }
   },
   "keywords": [],
-  "author": "",
   "license": "ISC",
   "dependencies": {
     "@base-ui/react": "^1.3.0",
