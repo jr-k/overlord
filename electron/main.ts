@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell }
 import type { OpenDialogOptions } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createConnection, createServer } from "net";
+import { appendFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -18,6 +19,21 @@ const iconPath = join(appRoot, "electron", "assets", "icon-128.png");
 
 let mainWindow: BrowserWindow | null = null;
 let serverHandle: OverlordServerHandle | null = null;
+
+function logBackend(chunk: Buffer, stream: "stdout" | "stderr") {
+  const text = `[overlord:backend:${stream}] ${chunk.toString()}`;
+  if (stream === "stderr") {
+    process.stderr.write(text);
+  } else {
+    process.stdout.write(text);
+  }
+
+  if (app.isPackaged) {
+    const logsDir = app.getPath("logs");
+    mkdirSync(logsDir, { recursive: true });
+    appendFileSync(join(logsDir, "backend.log"), text);
+  }
+}
 
 function getStaticRoot() {
   return join(appRoot, "dist", "client");
@@ -111,10 +127,10 @@ async function startBackend() {
   });
 
   serverProcess.stdout.on("data", (chunk: Buffer) => {
-    process.stdout.write(`[overlord:backend] ${chunk.toString()}`);
+    logBackend(chunk, "stdout");
   });
   serverProcess.stderr.on("data", (chunk: Buffer) => {
-    process.stderr.write(`[overlord:backend] ${chunk.toString()}`);
+    logBackend(chunk, "stderr");
   });
 
   const handle = { process: serverProcess, port };

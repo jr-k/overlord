@@ -27,8 +27,17 @@ build.files = [
   "electron/assets/**/*",
   "public/**/*",
   "scripts/**/*",
-  "node_modules/**/*",
   "package.json",
+];
+build.extraResources = [
+  {
+    from: "node_modules",
+    to: "node_modules",
+    filter: [
+      "**/*",
+      "!@colbymchenry/codegraph/node_modules/better-sqlite3/**/*",
+    ],
+  },
 ];
 build.mac.icon = "electron/assets/icon.icns";
 build.win.icon = "electron/assets/icon.ico";
@@ -68,7 +77,21 @@ function runNpm(args) {
 
 runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"]);
 
-runNpm(["rebuild", "better-sqlite3", `--runtime=electron`, `--target=${build.electronVersion}`, "--disturl=https://electronjs.org/headers"]);
+execFileSync(
+  process.execPath,
+  [
+    resolve(rootDir, "node_modules", ".bin", "electron-rebuild"),
+    "-f",
+    "-w",
+    "better-sqlite3",
+    "-v",
+    build.electronVersion,
+  ],
+  {
+    cwd: packageDir,
+    stdio: "inherit",
+  }
+);
 
 packageJson.dependencies = {};
 writeFileSync(join(packageDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);

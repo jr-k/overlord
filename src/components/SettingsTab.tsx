@@ -3,7 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, FolderEdit, Trash2, AlertTriangle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AlertTriangle, Check, SearchCode, Trash2 } from "lucide-react";
 import { patch } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 
@@ -208,8 +216,8 @@ export function SettingsTab({ project }: Props) {
         </div>
 
         <div className="flex w-full flex-col gap-4 xl:w-[380px] xl:shrink-0">
-          {/* Location */}
-          <LocationCard project={project} />
+          {/* Indexing */}
+          <IndexingCard project={project} />
 
           {/* Model */}
           <Card>
@@ -267,7 +275,7 @@ export function SettingsTab({ project }: Props) {
 }
 
 function DangerZoneCard({ project }: { project: Project }) {
-  const [confirming, setConfirming] = useState(false);
+  const [open, setOpen] = useState(false);
   const [deleteFolder, setDeleteFolder] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -311,18 +319,46 @@ function DangerZoneCard({ project }: { project: Project }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {!confirming ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setConfirming(true)}
-            className="gap-1.5 w-fit"
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete this project...
-          </Button>
-        ) : (
-          <div className="flex flex-col gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setOpen(true)}
+          className="gap-1.5 w-fit"
+        >
+          <Trash2 className="h-3 w-3" />
+          Delete this project...
+        </Button>
+
+        <Dialog
+          open={open}
+          onOpenChange={(nextOpen) => {
+            if (deleting) return;
+            setOpen(nextOpen);
+            if (!nextOpen) {
+              setDeleteFolder(false);
+              setConfirmText("");
+              setError(null);
+            }
+          }}
+        >
+          <DialogContent showCloseButton={!deleting} className="overflow-hidden border-destructive/30 p-0 sm:max-w-lg">
+            <div className="p-5">
+              <DialogHeader className="gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-destructive/20 bg-destructive/10 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <DialogTitle>Delete {project.name}?</DialogTitle>
+                    <DialogDescription className="mt-2 leading-relaxed">
+                      This removes the project from Overlord, including chats, todos, marketing content, and settings.
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+            </div>
+
+            <div className="flex flex-col gap-3 px-5 pb-5">
             <label className="flex items-center gap-2 text-xs cursor-pointer">
               <input
                 type="checkbox"
@@ -346,116 +382,131 @@ function DangerZoneCard({ project }: { project: Project }) {
               />
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <div className="flex gap-2">
+            </div>
+
+            <DialogFooter className="mx-0 mb-0 rounded-b-xl px-5 py-4 sm:pr-5">
               <Button
                 variant="destructive"
-                size="sm"
                 onClick={handleDelete}
                 disabled={!canDelete || deleting}
               >
                 {deleting ? "Deleting..." : deleteFolder ? "Delete project + folder" : "Delete project"}
               </Button>
               <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => { setConfirming(false); setConfirmText(""); setError(null); setDeleteFolder(false); }}
+                variant="outline"
+                onClick={() => setOpen(false)}
                 disabled={deleting}
               >
                 Cancel
               </Button>
-            </div>
-          </div>
-        )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
 }
 
-function LocationCard({ project }: { project: Project }) {
-  const [editing, setEditing] = useState(false);
-  const [newPath, setNewPath] = useState(project.path);
+function IndexingCard({ project }: { project: Project }) {
+  const [status, setStatus] = useState<{ indexed: boolean; indexing: boolean }>({ indexed: false, indexing: false });
+  const [busy, setBusy] = useState<"index" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  const refreshStatus = useCallback(() => {
+    fetch(`/api/codegraph/${project.id}/status`)
+      .then((res) => res.json())
+      .then((data) => {
+        setStatus({ indexed: !!data.indexed, indexing: !!data.indexing });
+      })
+      .catch((err) => setError(String(err)));
+  }, [project.id]);
 
   useEffect(() => {
-    setNewPath(project.path);
-    setEditing(false);
-    setError(null);
-  }, [project.id, project.path]);
+    refreshStatus();
+  }, [refreshStatus]);
 
-  const handleSave = useCallback(async () => {
-    if (!newPath.trim() || newPath === project.path) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
+  useEffect(() => {
+    if (!status.indexing) return;
+    const interval = window.setInterval(refreshStatus, 3000);
+    return () => window.clearInterval(interval);
+  }, [refreshStatus, status.indexing]);
+
+  const runAction = useCallback(async (action: "index" | "remove") => {
+    setBusy(action);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: newPath.trim() }),
+      const res = await fetch(`/api/codegraph/${project.id}${action === "index" ? "/init" : ""}`, {
+        method: action === "remove" ? "DELETE" : "POST",
       });
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setEditing(false);
-        // Trigger a full reload so the project list refreshes with new path
-        window.location.reload();
+      const text = await res.text();
+      let data: { error?: string } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || `HTTP ${res.status}` };
       }
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "CodeGraph action failed");
+      }
+      refreshStatus();
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
-  }, [newPath, project.id, project.path]);
+  }, [project.id, refreshStatus]);
+
+  const disabled = status.indexing || busy !== null;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm flex items-center gap-2">
-          <FolderEdit className="h-4 w-4" />
-          Location
+          <SearchCode className="h-4 w-4" />
+          Indexing
         </CardTitle>
         <CardDescription className="text-xs">
-          Rename or move the project folder. If the current folder exists, it will be moved. Otherwise, a new folder will be created. An error is shown if a folder already exists at the new location.
+          Configure CodeGraph for this project. When indexed, Claude can use a semantic code graph in Chat.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {editing ? (
-          <>
-            <Input
-              value={newPath}
-              onChange={(e) => { setNewPath(e.target.value); setError(null); }}
-              placeholder="/Users/you/Developer/new-name"
-              className="font-mono text-xs"
-              autoFocus
-            />
-            {error && (
-              <p className="text-xs text-destructive">{error}</p>
-            )}
-            <div className="flex gap-2">
-              <Button size="sm" onClick={handleSave} disabled={saving || newPath === project.path}>
-                {saving ? "Checking..." : "Update"}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => { setEditing(false); setNewPath(project.path); setError(null); }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div className="flex items-center justify-between gap-2">
-            <code className="font-mono text-xs text-muted-foreground truncate">{project.path}</code>
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              Change
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs">
+          <span
+            className={`h-2 w-2 rounded-full ${
+              status.indexing ? "bg-amber-400" : status.indexed ? "bg-emerald-400" : "bg-muted-foreground/50"
+            }`}
+          />
+          <span className="font-medium">
+            {status.indexing ? "Indexing in progress" : status.indexed ? "CodeGraph indexed" : "CodeGraph not indexed"}
+          </span>
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={() => runAction("index")}
+            disabled={disabled}
+          >
+            {busy === "index" || status.indexing ? "Indexing..." : status.indexed ? "Rebuild index" : "Create index"}
+          </Button>
+          {status.indexed && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => runAction("remove")}
+              disabled={disabled}
+              className="text-destructive hover:text-destructive"
+            >
+              {busy === "remove" ? "Removing..." : "Disable CodeGraph"}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
+
+        <p className="text-[11px] text-muted-foreground">
+          Rebuild the index after large code changes. Overlord keeps Chat focused on conversation and manages indexing here.
+        </p>
       </CardContent>
     </Card>
   );

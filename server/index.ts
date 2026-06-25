@@ -53,6 +53,13 @@ function runRuntimeSetupHooks() {
 runRuntimeSetupHooks();
 
 const app = new Hono();
+app.onError((err, c) => {
+  console.error("[api] unhandled error:", err);
+  if (c.req.path.startsWith("/api/")) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+  return c.text("Internal Server Error", 500);
+});
 app.use("/api/*", cors());
 app.use("/api/*", async (c, next) => {
   c.set("rootDir" as never, getWorkspaceRoot() as never);
@@ -136,25 +143,33 @@ app.post("/api/terminal/open", async (c) => {
 });
 
 const EDITORS = [
-  { id: "cursor", name: "Cursor", cmd: "cursor", test: "cursor" },
-  { id: "vscode", name: "VS Code", cmd: "code", test: "code" },
-  { id: "zed", name: "Zed", cmd: "zed", test: "zed" },
-  { id: "webstorm", name: "WebStorm", cmd: "webstorm", test: "webstorm" },
-  { id: "idea", name: "IntelliJ IDEA", cmd: "idea", test: "idea" },
-  { id: "sublime", name: "Sublime Text", cmd: "subl", test: "subl" },
+  { id: "cursor", name: "Cursor", cmd: "cursor", test: "cursor", darwinApp: "Cursor" },
+  { id: "vscode", name: "VS Code", cmd: "code", test: "code", darwinApp: "Visual Studio Code" },
+  { id: "zed", name: "Zed", cmd: "zed", test: "zed", darwinApp: "Zed" },
+  { id: "webstorm", name: "WebStorm", cmd: "webstorm", test: "webstorm", darwinApp: "WebStorm" },
+  { id: "idea", name: "IntelliJ IDEA", cmd: "idea", test: "idea", darwinApp: "IntelliJ IDEA" },
+  { id: "sublime", name: "Sublime Text", cmd: "subl", test: "subl", darwinApp: "Sublime Text" },
   { id: "vim", name: "Vim", cmd: "vim", test: "vim" },
   { id: "nano", name: "Nano", cmd: "nano", test: "nano" },
 ];
 
+function hasCommand(command: string) {
+  try {
+    execSync(`command -v ${command}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isEditorAvailable(editor: (typeof EDITORS)[number]) {
+  if (hasCommand(editor.test)) return true;
+  const darwinApp = "darwinApp" in editor ? editor.darwinApp : undefined;
+  return process.platform === "darwin" && !!darwinApp && hasDarwinApp(darwinApp);
+}
+
 app.get("/api/editors", (c) => {
-  const available = EDITORS.filter((e) => {
-    try {
-      execSync(`which ${e.test}`, { stdio: "ignore" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  const available = EDITORS.filter(isEditorAvailable);
   return c.json(available);
 });
 
@@ -166,7 +181,13 @@ app.post("/api/editor/open", async (c) => {
   const editorConfig = EDITORS.find((e) => e.id === editor);
   if (!editorConfig) return c.json({ error: "Unknown editor" }, 404);
 
-  spawn(editorConfig.cmd, [filePath], { detached: true, stdio: "ignore" });
+  if (hasCommand(editorConfig.cmd)) {
+    spawn(editorConfig.cmd, [filePath], { detached: true, stdio: "ignore" });
+  } else if (process.platform === "darwin" && "darwinApp" in editorConfig && editorConfig.darwinApp && hasDarwinApp(editorConfig.darwinApp)) {
+    spawn("open", ["-a", editorConfig.darwinApp, filePath], { detached: true, stdio: "ignore" });
+  } else {
+    return c.json({ error: `${editorConfig.name} is not available` }, 404);
+  }
   return c.json({ ok: true });
 });
 

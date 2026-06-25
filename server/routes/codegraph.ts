@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { existsSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
@@ -91,11 +91,21 @@ app.post("/:projectId/sync", async (c) => {
 // DELETE /api/codegraph/:projectId: remove .codegraph
 app.delete("/:projectId", async (c) => {
   const projectId = Number(c.req.param("projectId"));
-  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
-  if (!project) return c.json({ error: "Not found" }, 404);
+  if (!Number.isFinite(projectId)) {
+    return c.json({ error: "Invalid project id" }, 400);
+  }
 
-  await runCodegraph(["uninit", "--yes", project.path], project.path);
-  return c.json({ ok: true });
+  try {
+    const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+    if (!project) return c.json({ error: "Not found" }, 404);
+
+    indexingProjects.delete(projectId);
+    rmSync(join(project.path, ".codegraph"), { recursive: true, force: true });
+    return c.json({ ok: true, indexed: false, indexing: false });
+  } catch (err) {
+    console.log(`[codegraph:${projectId}] disable failed:`, err);
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });
 
 function runCodegraph(args: string[], cwd: string, timeoutMs = 10 * 60 * 1000): Promise<{ code: number; stdout: string; stderr: string }> {

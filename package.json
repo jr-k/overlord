@@ -46,6 +46,16 @@
       "public/**/*",
       "!node_modules/@colbymchenry/codegraph/node_modules/better-sqlite3/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules",
+        "to": "node_modules",
+        "filter": [
+          "**/*",
+          "!@colbymchenry/codegraph/node_modules/better-sqlite3/**/*"
+        ]
+      }
+    ],
     "mac": {
       "target": [
         {

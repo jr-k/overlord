@@ -11,6 +11,15 @@ interface EditorInfo {
 
 let editorsCache: EditorInfo[] | null = null;
 
+const MAC_FALLBACK_EDITORS: EditorInfo[] = [
+  { id: "cursor", name: "Cursor", cmd: "cursor" },
+  { id: "vscode", name: "VS Code", cmd: "code" },
+];
+
+function getFallbackEditors() {
+  return navigator.platform.toLowerCase().includes("mac") ? MAC_FALLBACK_EDITORS : [];
+}
+
 function useEditors() {
   const [editors, setEditors] = useState<EditorInfo[]>(editorsCache ?? []);
   useEffect(() => {
@@ -18,10 +27,11 @@ function useEditors() {
     fetch("/api/editors")
       .then((r) => r.json())
       .then((data) => {
-        editorsCache = data;
-        setEditors(data);
+        const nextEditors = Array.isArray(data) && data.length > 0 ? data : getFallbackEditors();
+        editorsCache = nextEditors;
+        setEditors(nextEditors);
       })
-      .catch(() => {});
+      .catch(() => setEditors(getFallbackEditors()));
   }, []);
   return editors;
 }
