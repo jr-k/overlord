@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { patch } from "../hooks/useApi.js";
 import type { Project, MarketingAsset } from "../types.js";
@@ -15,9 +15,17 @@ interface Props {
   project: Project;
   input: string;
   onInputChange: (value: string) => void;
+  activeWorkspaces: string[];
+  onToggleWorkspace: (path: string) => void;
 }
 
-export function MarketingTab({ project, input, onInputChange }: Props) {
+export function MarketingTab({
+  project,
+  input,
+  onInputChange,
+  activeWorkspaces,
+  onToggleWorkspace,
+}: Props) {
   const [infoCollapsed, setInfoCollapsed] = useState(false);
 
   return (
@@ -27,7 +35,7 @@ export function MarketingTab({ project, input, onInputChange }: Props) {
         <div className="p-3">
           <button
             onClick={() => setInfoCollapsed((v) => !v)}
-            className="flex items-center gap-1 w-full text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground mb-2"
+            className="flex items-center gap-1 w-full text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground mb-4"
           >
             {infoCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             Context
@@ -47,8 +55,8 @@ export function MarketingTab({ project, input, onInputChange }: Props) {
           project={project}
           input={input}
           onInputChange={onInputChange}
-          activeWorkspaces={[]}
-          onToggleWorkspace={() => {}}
+          activeWorkspaces={activeWorkspaces}
+          onToggleWorkspace={onToggleWorkspace}
           channel="marketing"
         />
       </div>
@@ -172,9 +180,9 @@ function AssetsCard({ project }: { project: Project }) {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader>
         <CardTitle className="text-sm">Assets ({assets.length})</CardTitle>
-        <div>
+        <CardAction>
           <input
             ref={fileInputRef}
             type="file"
@@ -186,7 +194,7 @@ function AssetsCard({ project }: { project: Project }) {
             <Upload className="h-3 w-3 mr-1" />
             {uploading ? "Uploading..." : "Upload"}
           </Button>
-        </div>
+        </CardAction>
       </CardHeader>
       <CardContent>
         {assets.length === 0 ? (

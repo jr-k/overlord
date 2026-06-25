@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { WebSocketServer } from "ws";
 import { spawn, execSync } from "child_process";
 import { resolve } from "path";
+import { pathToFileURL } from "url";
 
 import { initDb, db } from "./db/index.js";
 import { conversations, projects } from "./db/schema.js";
@@ -19,6 +20,8 @@ import skillsRoutes from "./routes/skills.js";
 import learningsRoutes from "./routes/learnings.js";
 import codegraphRoutes from "./routes/codegraph.js";
 import uploadsRoutes from "./routes/uploads.js";
+import settingsRoutes from "./routes/settings.js";
+import { getWorkspaceRoot } from "./settings.js";
 
 import { setWebSocketServer } from "./ws.js";
 import { attachWsHandlers } from "./agent/ws-handler.js";
@@ -27,15 +30,15 @@ import { getCommitsSince, rollbackToSnapshot } from "./agent/git-snapshot.js";
 import type { Channel } from "./agent/types.js";
 
 const PORT = Number(process.env.PORT) || 4747;
-const ROOT_DIR = process.env.OVERLORD_ROOT || resolve(process.cwd(), "..");
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const STATIC_ROOT = process.env.OVERLORD_STATIC_ROOT || resolve(process.cwd(), "dist/client");
 
 initDb();
 
 const app = new Hono();
 app.use("/api/*", cors());
 app.use("/api/*", async (c, next) => {
-  c.set("rootDir" as never, ROOT_DIR as never);
+  c.set("rootDir" as never, getWorkspaceRoot() as never);
   await next();
 });
 
@@ -48,6 +51,7 @@ app.route("/api/skills", skillsRoutes);
 app.route("/api/learnings", learningsRoutes);
 app.route("/api/codegraph", codegraphRoutes);
 app.route("/api/uploads", uploadsRoutes);
+app.route("/api/settings", settingsRoutes);
 
 type TerminalConfig =
   | { id: string; name: string; platform: "darwin"; app: string }
@@ -295,16 +299,28 @@ app.get("/api/agent/statuses", (c) => {
   return c.json(statuses);
 });
 
-app.use("/*", serveStatic({ root: "./dist/client" }));
-app.get("/*", serveStatic({ root: "./dist/client", path: "index.html" }));
+app.use("/*", serveStatic({ root: STATIC_ROOT }));
+app.get("/*", serveStatic({ root: STATIC_ROOT, path: "index.html" }));
 
-const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`🏰 Overlord running at http://localhost:${info.port}`);
-  console.log(`📁 Root directory: ${ROOT_DIR}`);
-});
+export function startOverlordServer(port = PORT) {
+  const server = serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`🏰 Overlord running at http://localhost:${info.port}`);
+    console.log(`📁 Workspace directory: ${getWorkspaceRoot()}`);
+  });
 
-const wss = new WebSocketServer({ server: server as never, path: "/ws" });
-setWebSocketServer(wss);
-attachWsHandlers(wss);
+  const wss = new WebSocketServer({ server: server as never, path: "/ws" });
+  setWebSocketServer(wss);
+  attachWsHandlers(wss);
 
-export { app, PORT, ROOT_DIR };
+  return { server, wss, port };
+}
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  : false;
+
+if (isDirectRun) {
+  startOverlordServer();
+}
+
+export { app, PORT, STATIC_ROOT };

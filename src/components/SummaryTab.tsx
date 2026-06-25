@@ -40,102 +40,113 @@ export function SummaryTab({ project }: Props) {
   const lastSummaryAt = fullProject?.lastSummaryAt;
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4 p-6">
-      {/* Session learnings */}
-      <LearningsSection project={project} />
+    <div className="flex w-full flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {/* Project summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Summary</CardTitle>
+              {lastSummaryAt && (
+                <CardDescription className="text-xs">
+                  Updated on{" "}
+                  {new Date(lastSummaryAt).toLocaleDateString("en-US", {
+                    day: "numeric",
+                    month: "long",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </CardDescription>
+              )}
+            </CardHeader>
+            <CardContent>
+              {summary ? (
+                <p className="max-h-[260px] overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+                  {summary}
+                </p>
+              ) : (
+                <p className="text-sm italic text-muted-foreground">
+                  No summary available. The summary will be generated automatically after your next conversation with Claude.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Project summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Project Summary</CardTitle>
-          {lastSummaryAt && (
-            <CardDescription className="text-xs">
-              Updated on{" "}
-              {new Date(lastSummaryAt).toLocaleDateString("en-US", {
-                day: "numeric",
-                month: "long",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </CardDescription>
-          )}
-        </CardHeader>
-        <CardContent>
-          {summary ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-              {summary}
-            </p>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              No summary available. The summary will be generated automatically after your next conversation with Claude.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Recent Conversations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {conversations && conversations.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {conversations.slice(0, 5).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex gap-3 border-b border-border py-2 last:border-0"
+                    >
+                      <span className="min-w-[120px] shrink-0 text-xs text-muted-foreground">
+                        {new Date(c.createdAt).toLocaleDateString("en-US", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="truncate text-sm text-foreground/70">
+                        {c.title ?? "Untitled session"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm italic text-muted-foreground">
+                  No conversations.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Project info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Info</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Path</span>
-              <span className="font-mono text-xs text-foreground/70">{project.path}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Conversations</span>
-              <span>{conversations?.length ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Created on</span>
-              <span className="text-foreground/70">
-                {new Date(project.createdAt).toLocaleDateString("en-US", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="flex w-full flex-col gap-4 xl:w-[360px] xl:shrink-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Path</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="break-all font-mono text-xs leading-relaxed text-foreground/70">
+                {project.path}
+              </p>
+            </CardContent>
+          </Card>
 
-      {/* Recent conversations */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Recent Conversations</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {conversations && conversations.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {conversations.slice(0, 10).map((c) => (
-                <div
-                  key={c.id}
-                  className="flex gap-3 border-b border-border py-2 last:border-0"
-                >
-                  <span className="min-w-[120px] shrink-0 text-xs text-muted-foreground">
-                    {new Date(c.createdAt).toLocaleDateString("en-US", {
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Stats</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-3 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Conversations</span>
+                  <span>{conversations?.length ?? 0}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Created on</span>
+                  <span className="text-right text-foreground/70">
+                    {new Date(project.createdAt).toLocaleDateString("en-US", {
                       day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
+                      month: "long",
+                      year: "numeric",
                     })}
                   </span>
-                  <span className="truncate text-sm text-foreground/70">
-                    {c.title ?? "Untitled session"}
-                  </span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              No conversations.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Session learnings */}
+      <LearningsSection project={project} />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { projects, sessions, conversations, messages, todos, marketingDrafts, marketingAssets } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { readdirSync, existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { isAbsolute, join, relative } from "path";
 import { execSync } from "child_process";
 import { detectWorkspaces } from "../workspaces.js";
 import { buildEffectiveSystemPrompt } from "../agent/system-prompt.js";
@@ -33,14 +33,21 @@ function getGitRemoteUrl(projectPath: string): string | null {
 
 const app = new Hono();
 
+function isInWorkspace(projectPath: string, workspaceRoot: string) {
+  const rel = relative(workspaceRoot, projectPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 // GET /api/projects - list all projects (non-hidden, favorites first)
 app.get("/", (c) => {
   const showHidden = c.req.query("hidden") === "true";
+  const rootDir = (c.get("rootDir" as never) as string) || process.cwd();
   const allProjects = db
     .select()
     .from(projects)
     .orderBy(desc(projects.favorite), desc(projects.updatedAt))
     .all()
+    .filter((p) => isInWorkspace(p.path, rootDir))
     .filter((p) => showHidden || !p.hidden);
   return c.json(allProjects);
 });

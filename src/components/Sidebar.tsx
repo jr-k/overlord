@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { patch, post } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 import type { AgentStatusMap } from "../App.js";
-import { Star, EyeOff, Eye, FolderPlus, FolderSearch, Loader2, Check, X } from "lucide-react";
+import { Star, EyeOff, Eye, FolderPlus, FolderSearch, Loader2, Check, X, FolderCog } from "lucide-react";
 
 const AGENT_STATUS_STYLES: Record<string, string> = {
   none:    "bg-zinc-500/50",
@@ -73,6 +73,7 @@ interface Props {
   onSelect: (p: Project) => void;
   onScan: () => void | Promise<void>;
   onProjectUpdate: () => void;
+  onOpenWorkspaceSettings: () => void;
 }
 
 export function ProjectSidebar({
@@ -82,6 +83,7 @@ export function ProjectSidebar({
   onSelect,
   onScan,
   onProjectUpdate,
+  onOpenWorkspaceSettings,
 }: Props) {
   const [search, setSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -210,7 +212,7 @@ export function ProjectSidebar({
 
   return (
     <Sidebar>
-      <SidebarHeader>
+      <SidebarHeader className="desktop-sidebar-header">
         <div className="flex items-center gap-2">
           <img
             src="/favicons/favicon-128.png"
@@ -296,7 +298,7 @@ export function ProjectSidebar({
           </div>
         )}
 
-        <div className="grid grid-cols-3 divide-x divide-sidebar-border overflow-hidden rounded-lg border border-sidebar-border bg-sidebar-accent/30">
+        <div className="grid grid-cols-4 divide-x divide-sidebar-border overflow-hidden rounded-lg border border-sidebar-border bg-sidebar-accent/30">
           <Tooltip>
             <TooltipTrigger>
               <Button
@@ -310,6 +312,22 @@ export function ProjectSidebar({
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
               New project
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-8 w-full rounded-none border-0 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                onClick={onOpenWorkspaceSettings}
+              >
+                <FolderCog className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Change workspace folder
             </TooltipContent>
           </Tooltip>
 

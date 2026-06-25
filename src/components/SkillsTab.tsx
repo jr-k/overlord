@@ -85,7 +85,7 @@ export function SkillsTab({ project }: Props) {
   const total = skills.project.length + skills.global.length;
 
   return (
-    <div className="flex max-w-5xl flex-col gap-4 p-6">
+    <div className="flex w-full flex-col gap-4 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold flex items-center gap-2">

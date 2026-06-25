@@ -11,16 +11,32 @@ import { OpenInEditorButton } from "./components/OpenInEditorButton.js";
 import { OpenTerminalButton } from "./components/OpenTerminalButton.js";
 import { TodosTab } from "./components/TodosTab.js";
 import { WorkspacesTab } from "./components/WorkspacesTab.js";
+import { WorkspaceOnboarding } from "./components/WorkspaceOnboarding.js";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Menu } from "lucide-react";
 
 export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
+type WorkspaceSettings = {
+  path: string;
+  configured: boolean;
+  source: "user" | "env" | "default";
+};
+
 const VISIBLE_TABS = ["chat", "todos", "marketing", "skills", "summary", "settings"] as const;
 type VisibleTab = typeof VISIBLE_TABS[number];
+
+const TAB_LABELS: Record<VisibleTab, string> = {
+  chat: "Chat",
+  todos: "Todos",
+  marketing: "Marketing",
+  skills: "Skills",
+  summary: "Summary",
+  settings: "Settings",
+};
 
 function normalizeTab(value: string | null | undefined): VisibleTab {
   return VISIBLE_TABS.includes(value as VisibleTab) ? (value as VisibleTab) : "chat";
@@ -42,12 +58,15 @@ function getProjectRoute(project: Project, tab: string) {
 }
 
 export function App() {
+  const { data: workspaceSettings, refetch: refetchWorkspaceSettings } = useApi<WorkspaceSettings>("/settings/workspace");
   const { data: projects, refetch } = useApi<Project[]>("/projects?hidden=true");
   const [selected, setSelected] = useState<Project | null>(null);
   const [tab, setTab] = useState<string>(() => {
     const route = readRouteFromPathname();
     return route.projectName ? route.tab : normalizeTab(localStorage.getItem("overlord:tab"));
   });
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem("overlord:chatInputs") ?? "{}");
@@ -108,6 +127,12 @@ export function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [projects]);
+
+  useEffect(() => {
+    if (!projects) return;
+    if (selected && projects.some((project) => project.id === selected.id)) return;
+    setSelected(projects[0] ?? null);
+  }, [projects, selected]);
 
   // Persist selected project + fetch remote URL
   useEffect(() => {
@@ -201,6 +226,14 @@ export function App() {
     refetch();
   }, [refetch]);
 
+  const handleWorkspaceConfigured = useCallback(async () => {
+    setWorkspaceModalOpen(false);
+    refetchWorkspaceSettings();
+    setSelected(null);
+    await post("/projects/scan");
+    refetch();
+  }, [refetch, refetchWorkspaceSettings]);
+
   const handleSelect = useCallback((p: Project) => {
     setSelected(p);
   }, []);
@@ -231,6 +264,11 @@ export function App() {
     [selected]
   );
 
+  const handleTabChange = useCallback((value: string) => {
+    setTab(normalizeTab(value));
+    setTabMenuOpen(false);
+  }, []);
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -241,15 +279,23 @@ export function App() {
           onSelect={handleSelect}
           onScan={handleScan}
           onProjectUpdate={refetch}
+          onOpenWorkspaceSettings={() => setWorkspaceModalOpen(true)}
         />
+        {workspaceSettings && (!workspaceSettings.configured || workspaceModalOpen) && (
+          <WorkspaceOnboarding
+            initialPath={workspaceSettings.path}
+            onComplete={handleWorkspaceConfigured}
+            onCancel={workspaceSettings.configured ? () => setWorkspaceModalOpen(false) : undefined}
+          />
+        )}
         <SidebarInset className="flex flex-col overflow-hidden min-h-0 h-screen">
           {selected ? (
             <div className="flex flex-1 flex-col overflow-hidden">
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+              <header className="desktop-titlebar-drag flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
                 <SidebarTrigger className="-ml-2" />
                 <Separator orientation="vertical" className="mr-2" />
-                <h2 className="flex-1 flex items-center gap-2 text-sm font-semibold">
-                  {selected.name}
+                <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold">
+                  <span className="truncate">{selected.name}</span>
                   {remoteUrl && (
                     <Tooltip>
                       <TooltipTrigger>
@@ -269,7 +315,7 @@ export function App() {
                   <OpenInEditorButton path={selected.path} />
                   <OpenTerminalButton path={selected.path} />
                 </h2>
-                <Tabs value={tab} onValueChange={setTab}>
+                <Tabs value={tab} onValueChange={handleTabChange} className="desktop-titlebar-no-drag hidden xl:flex">
                   <TabsList>
                     <TabsTrigger value="chat">Chat</TabsTrigger>
                     <TabsTrigger value="todos">Todos</TabsTrigger>
@@ -279,6 +325,34 @@ export function App() {
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
                 </Tabs>
+                <div className="desktop-titlebar-no-drag relative xl:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setTabMenuOpen((open) => !open)}
+                    className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-secondary px-2 text-xs text-muted-foreground hover:text-foreground"
+                    aria-label="Open section menu"
+                    aria-expanded={tabMenuOpen}
+                  >
+                    <Menu className="h-4 w-4" />
+                    <span className="hidden sm:inline">{TAB_LABELS[normalizeTab(tab)]}</span>
+                  </button>
+                  {tabMenuOpen && (
+                    <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-lg">
+                      {VISIBLE_TABS.map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleTabChange(value)}
+                          className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${
+                            normalizeTab(tab) === value ? "text-foreground" : "text-muted-foreground"
+                          }`}
+                        >
+                          {TAB_LABELS[value]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </header>
 
               <div className="flex-1 overflow-hidden min-h-0">
@@ -299,6 +373,8 @@ export function App() {
                       project={selected}
                       input={marketingInputs[selected.id] ?? ""}
                       onInputChange={handleMarketingInputChange}
+                      activeWorkspaces={activeWorkspaces[selected.id] ?? []}
+                      onToggleWorkspace={(path) => handleToggleWorkspace(selected.id, path)}
                     />
                   </div>
                 )}

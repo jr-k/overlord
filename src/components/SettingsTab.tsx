@@ -102,7 +102,7 @@ export function SettingsTab({ project }: Props) {
   }, []);
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4 p-6">
+    <div className="flex w-full flex-col gap-4 p-6">
       {/* Header actions */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Agent settings for {project.name}</h3>
@@ -122,147 +122,153 @@ export function SettingsTab({ project }: Props) {
         </div>
       </div>
 
-      {/* Location */}
-      <LocationCard project={project} />
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {/* System prompt */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">System prompt</CardTitle>
+              <CardDescription className="text-xs">
+                Appended to Claude's default system prompt. Default: {DEFAULT_SYSTEM_PROMPT}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Textarea
+                value={systemPrompt}
+                onChange={(e) => { setSystemPrompt(e.target.value); setDirty(true); }}
+                placeholder={DEFAULT_SYSTEM_PROMPT}
+                className="min-h-[120px] resize-y font-mono text-xs"
+              />
 
-      {/* Model */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Model</CardTitle>
-          <CardDescription className="text-xs">
-            Claude model to use for this project. Empty = use Claude CLI default.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <select
-            value={model}
-            onChange={(e) => { setModel(e.target.value); setDirty(true); }}
-            className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {AVAILABLE_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
-        </CardContent>
-      </Card>
-
-      {/* System prompt */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">System prompt</CardTitle>
-          <CardDescription className="text-xs">
-            Appended to Claude's default system prompt. Default: {DEFAULT_SYSTEM_PROMPT}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Textarea
-            value={systemPrompt}
-            onChange={(e) => { setSystemPrompt(e.target.value); setDirty(true); }}
-            placeholder={DEFAULT_SYSTEM_PROMPT}
-            className="min-h-[120px] resize-y font-mono text-xs"
-          />
-
-          {effectivePrompt && (
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold">
-                  Effective prompt sent to Claude
+              {effectivePrompt && (
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold">
+                      Effective prompt sent to Claude
+                      {effectivePrompt.nudges.length > 0 && (
+                        <span className="ml-2 text-[10px] text-emerald-400 font-normal">
+                          + {effectivePrompt.nudges.length} auto-nudge{effectivePrompt.nudges.length > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setShowEffective((s) => !s)}>
+                      {showEffective ? "Hide" : "Show"}
+                    </Button>
+                  </div>
                   {effectivePrompt.nudges.length > 0 && (
-                    <span className="ml-2 text-[10px] text-emerald-400 font-normal">
-                      + {effectivePrompt.nudges.length} auto-nudge{effectivePrompt.nudges.length > 1 ? "s" : ""}
-                    </span>
+                    <div className="space-y-1">
+                      {effectivePrompt.nudges.map((n) => (
+                        <div key={n.name} className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5 text-[11px]">
+                          <span className="font-semibold text-emerald-400">{n.name}</span>
+                          <span className="ml-2 text-muted-foreground">{n.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {showEffective && (
+                    <pre className="max-h-[300px] overflow-auto rounded-md border border-border bg-secondary/50 p-3 text-[11px] font-mono whitespace-pre-wrap select-text">
+                      {effectivePrompt.full}
+                    </pre>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setShowEffective((s) => !s)}>
-                  {showEffective ? "Hide" : "Show"}
-                </Button>
-              </div>
-              {effectivePrompt.nudges.length > 0 && (
-                <div className="space-y-1">
-                  {effectivePrompt.nudges.map((n) => (
-                    <div key={n.name} className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5 text-[11px]">
-                      <span className="font-semibold text-emerald-400">{n.name}</span>
-                      <span className="ml-2 text-muted-foreground">{n.reason}</span>
-                    </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Allowed tools */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Allowed tools</CardTitle>
+              <CardDescription className="text-xs">
+                Tools the agent is allowed to use without asking permission.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-3">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Built-in tools
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {DEFAULT_TOOLS.map((tool) => (
+                    <ToolToggle key={tool} tool={tool} selected={selectedTools.has(tool)} onToggle={toggleTool} />
                   ))}
                 </div>
-              )}
-              {showEffective && (
-                <pre className="max-h-[300px] overflow-auto rounded-md border border-border bg-secondary/50 p-3 text-[11px] font-mono whitespace-pre-wrap select-text">
-                  {effectivePrompt.full}
-                </pre>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+              <div>
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Overlord MCP tools
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {OVERLORD_MCP_TOOLS.map((tool) => (
+                    <ToolToggle
+                      key={tool}
+                      tool={tool}
+                      label={tool.replace("mcp__overlord__overlord_", "")}
+                      selected={selectedTools.has(tool)}
+                      onToggle={toggleTool}
+                    />
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Session analysis */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Session analysis</CardTitle>
-          <CardDescription className="text-xs">
-            {"At the end of each chat conversation (at least 3 tool uses or messages), Overlord starts a Claude agent that analyzes the session and extracts learnings (dead ends, missing context, recommendations), visible in the Summary tab."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <label className="flex items-center gap-2 cursor-pointer text-sm">
-            <input
-              type="checkbox"
-              checked={learningsEnabled}
-              onChange={(e) => { setLearningsEnabled(e.target.checked); setDirty(true); }}
-              className="h-4 w-4 rounded border-border accent-primary"
-            />
-            <span>Enable automatic analysis after each session</span>
-          </label>
-          {!learningsEnabled && (
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Disabled: sessions will no longer be analyzed. This saves tokens and time, but you will no longer get automatic feedback.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        <div className="flex w-full flex-col gap-4 xl:w-[380px] xl:shrink-0">
+          {/* Location */}
+          <LocationCard project={project} />
 
-      {/* Allowed tools */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Allowed tools</CardTitle>
-          <CardDescription className="text-xs">
-            Tools the agent is allowed to use without asking permission.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-3">
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Built-in tools
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {DEFAULT_TOOLS.map((tool) => (
-                <ToolToggle key={tool} tool={tool} selected={selectedTools.has(tool)} onToggle={toggleTool} />
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Overlord MCP tools
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {OVERLORD_MCP_TOOLS.map((tool) => (
-                <ToolToggle
-                  key={tool}
-                  tool={tool}
-                  label={tool.replace("mcp__overlord__overlord_", "")}
-                  selected={selectedTools.has(tool)}
-                  onToggle={toggleTool}
+          {/* Model */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Model</CardTitle>
+              <CardDescription className="text-xs">
+                Claude model to use for this project. Empty = use Claude CLI default.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <select
+                value={model}
+                onChange={(e) => { setModel(e.target.value); setDirty(true); }}
+                className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </CardContent>
+          </Card>
+
+          {/* Session analysis */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Session analysis</CardTitle>
+              <CardDescription className="text-xs">
+                {"At the end of each chat conversation (at least 3 tool uses or messages), Overlord starts a Claude agent that analyzes the session and extracts learnings (dead ends, missing context, recommendations), visible in the Summary tab."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  checked={learningsEnabled}
+                  onChange={(e) => { setLearningsEnabled(e.target.checked); setDirty(true); }}
+                  className="h-4 w-4 rounded border-border accent-primary"
                 />
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+                <span>Enable automatic analysis after each session</span>
+              </label>
+              {!learningsEnabled && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Disabled: sessions will no longer be analyzed. This saves tokens and time, but you will no longer get automatic feedback.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Danger zone */}
-      <DangerZoneCard project={project} />
+          {/* Danger zone */}
+          <DangerZoneCard project={project} />
+        </div>
+      </div>
     </div>
   );
 }

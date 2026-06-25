@@ -12,6 +12,31 @@ import type { Project } from "../types.js";
 type AgentStatus = "idle" | "waiting" | "running";
 type LearningsStatus = "idle" | "generating";
 
+interface OverlordDesktopBridge {
+  isDesktop: boolean;
+  notifyAgentDone: (payload: { projectName: string; body?: string }) => Promise<unknown>;
+}
+
+function getDesktopBridge() {
+  return (window as Window & { overlordDesktop?: OverlordDesktopBridge }).overlordDesktop;
+}
+
+function notifyAgentDone(projectName: string) {
+  const body = "Claude has finished its work.";
+  const desktop = getDesktopBridge();
+  if (desktop?.isDesktop) {
+    void desktop.notifyAgentDone({ projectName, body });
+    return;
+  }
+
+  if (document.hidden && Notification.permission === "granted") {
+    new Notification(`Overlord - ${projectName}`, {
+      body,
+      icon: "/favicons/favicon-128.png",
+    });
+  }
+}
+
 interface PastedBlock {
   id: string;
   content: string;
@@ -804,13 +829,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           return "";
         });
 
-        // Desktop notification
-        if (document.hidden && Notification.permission === "granted") {
-          new Notification(`Overlord - ${project.name}`, {
-            body: "Claude has finished its work.",
-            icon: "/favicons/favicon-128.png",
-          });
-        }
+        notifyAgentDone(project.name);
 
         // Process message queue — send next queued message
         setMessageQueue((queue) => {
