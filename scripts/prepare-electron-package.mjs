@@ -1,6 +1,6 @@
 import { execFileSync } from "child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -48,20 +48,26 @@ const packageJson = {
 
 writeFileSync(join(packageDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
 
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-execFileSync(npmCommand, ["install", "--omit=dev", "--no-audit", "--no-fund"], {
-  cwd: packageDir,
-  stdio: "inherit",
-});
+function resolveNpmCli() {
+  if (process.env.npm_execpath) {
+    return process.env.npm_execpath;
+  }
 
-execFileSync(
-  npmCommand,
-  ["rebuild", "better-sqlite3", `--runtime=electron`, `--target=${build.electronVersion}`, "--disturl=https://electronjs.org/headers"],
-  {
+  return process.platform === "win32"
+    ? resolve(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
+    : resolve(dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+}
+
+function runNpm(args) {
+  execFileSync(process.execPath, [resolveNpmCli(), ...args], {
     cwd: packageDir,
     stdio: "inherit",
-  }
-);
+  });
+}
+
+runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"]);
+
+runNpm(["rebuild", "better-sqlite3", `--runtime=electron`, `--target=${build.electronVersion}`, "--disturl=https://electronjs.org/headers"]);
 
 packageJson.dependencies = {};
 writeFileSync(join(packageDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
