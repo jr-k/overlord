@@ -80,7 +80,7 @@ app.get("/:id/workspaces", (c) => {
   return c.json(info);
 });
 
-// GET /api/projects/:id/system-prompt?channel=chat — preview the effective system prompt
+// GET /api/projects/:id/system-prompt?channel=chat: preview the effective system prompt
 app.get("/:id/system-prompt", (c) => {
   const id = Number(c.req.param("id"));
   const channel = (c.req.query("channel") as Channel) || "chat";
@@ -138,7 +138,7 @@ app.patch("/:id", async (c) => {
 
       // Clear the claudeSessionId of any in-memory agent session for this project
       // (Claude sessions are tied to cwd, so rename invalidates them)
-      // This is done via the DB indirectly — but also clear conversations' sessionId
+      // This is done via the DB indirectly, but also clear conversations' sessionId.
       db.update(conversations)
         .set({ claudeSessionId: null })
         .where(eq(conversations.projectId, id))

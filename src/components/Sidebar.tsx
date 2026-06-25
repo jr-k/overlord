@@ -21,10 +21,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { patch, post } from "../hooks/useApi.js";
+import { patch, post, useApi } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 import type { AgentStatusMap } from "../App.js";
-import { Star, EyeOff, Eye, FolderPlus, FolderSearch, Loader2, Check, X, FolderCog } from "lucide-react";
+import { Star, EyeOff, Eye, FolderPlus, FolderSearch, Loader2, Check, X, FolderCog, ExternalLink } from "lucide-react";
 
 const AGENT_STATUS_STYLES: Record<string, string> = {
   none:    "bg-zinc-500/50",
@@ -32,6 +32,11 @@ const AGENT_STATUS_STYLES: Record<string, string> = {
   running: "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.4)] animate-pulse",
   done:    "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.4)]",
   error:   "bg-red-400 shadow-[0_0_4px_rgba(248,113,113,0.4)]",
+};
+
+type AppInfo = {
+  version: string;
+  githubUrl: string;
 };
 
 function OverlordStar({ active }: { active: boolean }) {
@@ -91,6 +96,7 @@ export function ProjectSidebar({
   const [newProjectName, setNewProjectName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const { data: appInfo } = useApi<AppInfo>("/settings/about");
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim();
@@ -168,7 +174,7 @@ export function ProjectSidebar({
         <span className="truncate">{p.name}</span>
       </SidebarMenuButton>
 
-      {/* Action buttons — visible on hover */}
+      {/* Action buttons, visible on hover */}
       <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
         <Tooltip>
           <TooltipTrigger>
@@ -372,6 +378,20 @@ export function ProjectSidebar({
             </TooltipContent>
           </Tooltip>
         </div>
+        {appInfo && (
+          <div className="flex items-center justify-between px-1 text-[10px] text-sidebar-foreground/40">
+            <span>v{appInfo.version}</span>
+            <a
+              href={appInfo.githubUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-sidebar-foreground/70"
+            >
+              <ExternalLink className="h-3 w-3" />
+              GitHub
+            </a>
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

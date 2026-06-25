@@ -253,7 +253,7 @@ export function App() {
 
       ws.onopen = () => {
         attempts = 0;
-        // Resync after reconnect — server-side state may have changed
+        // Resync after reconnect. Server-side state may have changed.
         refetchStatuses();
       };
 
@@ -311,7 +311,7 @@ export function App() {
     [selected]
   );
 
-  // Stable callbacks for the chat/marketing inputs — keyed by current project
+  // Stable callbacks for chat and marketing inputs, keyed by current project.
   const handleChatInputChange = useCallback(
     (v: string) => {
       if (!selected) return;

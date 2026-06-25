@@ -382,7 +382,7 @@ const MessageBubble = React.memo(function MessageBubble({ content, projectId }: 
   );
 });
 
-// Persistent message queue — list, edit and delete pending messages.
+// Persistent message queue: list, edit and delete pending messages.
 function QueuePanel({
   queue,
   agentIdle,
@@ -423,15 +423,15 @@ function QueuePanel({
           {queue.length}
         </span>
         <span className="text-xs text-muted-foreground">
-          message{queue.length > 1 ? "s" : ""} en attente
+          pending message{queue.length > 1 ? "s" : ""}
         </span>
         {agentIdle && (
           <button
             onClick={onRun}
             className="text-[10px] font-medium text-primary hover:underline"
-            title="Envoyer maintenant le prochain message de la file"
+            title="Send the next queued message now"
           >
-            Reprendre
+            Resume
           </button>
         )}
         <button
@@ -526,9 +526,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
   // Model settings (fetched from project)
   const [model, setModel] = useState<string>("");
-  // Modèle réellement résolu par la CLI (alias -> version complète), lu dans l'event system/init.
+  // Concrete model resolved by the CLI (alias to full version), read from the `system/init` event.
   const [resolvedModel, setResolvedModel] = useState<string>("");
-  // Liste des modèles (versions résolues dynamiquement côté serveur).
+  // Model list with versions resolved dynamically by the server.
   const models = useModels();
   useEffect(() => {
     fetch(`/api/projects/${project.id}`)
@@ -606,7 +606,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     avg_savings_pct: number;
   } | null>(null);
 
-  // Codegraph usage estimate — heuristic tokens saved per tool call (arbitrary, tweakable).
+  // Codegraph usage estimate: heuristic tokens saved per tool call (arbitrary, tweakable).
   // Each value = rough tokens a Read+Grep equivalent would have consumed.
   const codegraphSavingsPerCall: Record<string, number> = {
     mcp__codegraph__codegraph_context: 8000,
@@ -641,9 +641,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     return { perTool, totalCalls, totalConsumed, totalSaved };
   }, [entries]);
 
-  const formatMs = (ms: number | null) => ms === null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const formatMs = (ms: number | null) => ms === null ? "-" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 
-  // Message queue — persisted server-side, synced via `queue:state` events.
+  // Message queue: persisted server-side and synced through `queue:state` events.
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 
   // Per-turn latency tracking
@@ -692,7 +692,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     };
   }, [turnTimings]);
 
-  // Pasted content — stored separately, shown as badges
+  // Pasted content: stored separately and shown as badges.
   const [pastedBlocks, setPastedBlocks] = useState<{ id: string; content: string; lineCount: number }[]>([]);
   const [fileBlocks, setFileBlocks] = useState<FileBlock[]>([]);
 
@@ -826,7 +826,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
       ws.onclose = () => {
         setConnected(false);
-        // Don't touch agentStatus — server process likely still running. Reconnect will resync.
+        // Do not touch agentStatus. The server process is likely still running, and reconnect will resync.
         if (cancelled) return;
         const delay = Math.min(10000, 500 * Math.pow(2, attempts++));
         reconnectTimer = setTimeout(connect, delay);
@@ -889,8 +889,8 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         setStreamingText("");
         currentTurnRef.current = { sentAt: Date.now() };
       } else if (msg.type === "agent:snapshot") {
-        // Upsert: patch the optimistic user bubble with the snapshot SHA, or —
-        // for a queued message dispatched by the server — append a new bubble.
+        // Upsert: patch the optimistic user bubble with the snapshot SHA.
+        // For a queued message dispatched by the server, append a new bubble.
         setEntries((prev) => {
           const updated = [...prev];
           let found = false;
@@ -946,7 +946,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             setAgentStatus("running");
           }
 
-          // Tool use start — flush text, begin tracking tool
+          // Tool use start: flush text and begin tracking the tool.
           if (inner?.type === "content_block_start" && inner.content_block?.type === "tool_use") {
             if (currentTurnRef.current && currentTurnRef.current.firstToolAt === undefined) {
               currentTurnRef.current.firstToolAt = Date.now();
@@ -973,7 +973,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             currentToolRef.current.inputJson += inner.delta.partial_json;
           }
 
-          // Tool use end — parse input and add entry
+          // Tool use end: parse input and add the entry.
           if (inner?.type === "content_block_stop" && currentToolRef.current) {
             const tool = currentToolRef.current;
             currentToolRef.current = null;
@@ -1002,7 +1002,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             }
           }
         } else if (ev.type === "assistant") {
-          // Complete assistant message — might contain tool_result
+          // Complete assistant message. It might contain tool_result.
           const blocks = ev.message?.content ?? [];
           for (const block of blocks) {
             if (block.type === "tool_result") {
@@ -1154,7 +1154,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       Notification.requestPermission();
     }
 
-    // Send immediately only when the agent is idle AND the queue is empty —
+    // Send immediately only when the agent is idle and the queue is empty.
     // otherwise append to the persistent server-side queue to preserve order.
     if (agentStatus !== "idle" || messageQueue.length > 0) {
       wsRef.current.send(
@@ -1234,7 +1234,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     );
   }, [project.id, channel]);
 
-  // Queue management — all mutations go through the server (source of truth).
+  // Queue management: all mutations go through the server as the source of truth.
   const sendWs = useCallback((obj: object) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -1336,8 +1336,8 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                 codegraphStatus.indexing
                   ? "CodeGraph is indexing the project"
                   : codegraphStatus.indexed
-                    ? "CodeGraph indexed — Claude uses a semantic index to explore the code"
-                    : "CodeGraph not indexed — click 'Index' to enable"
+                    ? "CodeGraph indexed. Claude uses a semantic index to explore the code"
+                    : "CodeGraph not indexed. Click 'Index' to enable"
               }
             >
               <span className={cn(
@@ -1365,7 +1365,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           {resolvedModel && (
             <span
               className="hidden lg:inline text-[10px] text-muted-foreground font-mono"
-              title={`Modèle résolu par la CLI : ${resolvedModel}`}
+              title={`Model resolved by the CLI: ${resolvedModel}`}
             >
               → {formatModelVersion(resolvedModel)}
             </span>
@@ -1406,27 +1406,27 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
                 <div className="space-y-1.5 font-sans">
-                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong> — tokens sent to Claude (your message + project context)</p>
-                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong> — tokens generated by Claude (its response)</p>
+                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong>: tokens sent to Claude (your message + project context)</p>
+                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong>: tokens generated by Claude (its response)</p>
                   {tokenStats.cacheReadTokens > 0 && (
-                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong> — tokens read from cache instead of being reprocessed (cost savings)</p>
+                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong>: tokens read from cache instead of being reprocessed (cost savings)</p>
                   )}
-                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cumulative API cost for this session ({tokenStats.turns} exchange{tokenStats.turns > 1 ? "s" : ""})</p>
+                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong>: cumulative API cost for this session ({tokenStats.turns} exchange{tokenStats.turns > 1 ? "s" : ""})</p>
                   {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
-                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens saved by RTK across {rtkSavings.total_commands} shell commands (compresses git status, ls, etc.)</p>
+                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong>: tokens saved by RTK across {rtkSavings.total_commands} shell commands (compresses git status, ls, etc.)</p>
                   )}
                   {codegraphStatus.indexed && (
                     <div className="border-t border-border/50 pt-1.5 mt-1.5">
-                      <p><strong className="text-cyan-400">Codegraph</strong> — {codegraphStats.totalCalls} call{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
+                      <p><strong className="text-cyan-400">Codegraph</strong>: {codegraphStats.totalCalls} call{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
                       {codegraphStats.totalCalls > 0 ? (
                         <>
                           <p className="text-muted-foreground">Consumed: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (results read by Claude)</p>
                           <p className="text-muted-foreground">Estimated savings: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs equivalent Read/Grep calls</p>
-                          <p className="text-[10px] italic opacity-60 mt-1">Rough heuristic (8k/context, 5k/callers, 3k/search, 0.5k/files). Saved/consumed ratio = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "—"}x.</p>
+                          <p className="text-[10px] italic opacity-60 mt-1">Rough heuristic (8k/context, 5k/callers, 3k/search, 0.5k/files). Saved/consumed ratio = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "-"}x.</p>
                           <div className="mt-1 space-y-0.5">
                             {Object.entries(codegraphStats.perTool).map(([tool, s]) => (
                               <p key={tool} className="text-[10px] text-muted-foreground font-mono">
-                                {tool.replace("mcp__codegraph__codegraph_", "")}: {s.calls}× — {formatTokens(s.consumed)} in / ~{formatTokens(s.saved)} saved
+                                {tool.replace("mcp__codegraph__codegraph_", "")}: {s.calls}x, {formatTokens(s.consumed)} in / ~{formatTokens(s.saved)} saved
                               </p>
                             ))}
                           </div>
@@ -1448,7 +1448,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                           <tr><td className="text-muted-foreground pr-2">TTFA (1er tool)</td><td>{formatMs(latencyStats.lastTTFA)}</td></tr>
                           <tr><td className="text-muted-foreground pr-2">API time</td><td>{formatMs(latencyStats.lastApi)}</td></tr>
                           <tr><td className="text-muted-foreground pr-2">Total wall</td><td>{formatMs(latencyStats.lastTotal)}</td></tr>
-                          <tr><td className="text-muted-foreground pr-2">Model turns</td><td>{latencyStats.lastNumTurns ?? "—"}</td></tr>
+                          <tr><td className="text-muted-foreground pr-2">Model turns</td><td>{latencyStats.lastNumTurns ?? "-"}</td></tr>
                         </tbody>
                       </table>
                       {latencyStats.sampleSize > 1 && (
@@ -1672,7 +1672,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           </div>
         )}
 
-        {/* Queued messages — persisted, editable, deletable */}
+        {/* Queued messages: persisted, editable and deletable */}
         <QueuePanel
           queue={messageQueue}
           agentIdle={agentStatus === "idle"}

@@ -20,7 +20,7 @@ export function broadcast(session: AgentSession, msg: object) {
   }
 }
 
-// Debounced save — avoids blocking the event loop during heavy streaming
+// Debounced save to avoid blocking the event loop during heavy streaming.
 const saveTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export function saveEvents(session: AgentSession) {

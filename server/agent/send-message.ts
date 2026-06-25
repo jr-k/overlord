@@ -165,14 +165,14 @@ export function sendMessage(session: AgentSession, message: string) {
   });
 
   let activityTimer = setTimeout(() => {
-    console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+    console.log(`[agent:${session.projectId}] timeout: no activity for 5 minutes, killing`);
     proc.kill("SIGTERM");
   }, 5 * 60 * 1000);
 
   const resetActivityTimer = () => {
     clearTimeout(activityTimer);
     activityTimer = setTimeout(() => {
-      console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+      console.log(`[agent:${session.projectId}] timeout: no activity for 5 minutes, killing`);
       proc.kill("SIGTERM");
     }, 5 * 60 * 1000);
   };

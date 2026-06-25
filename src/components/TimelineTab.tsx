@@ -42,7 +42,7 @@ export function TimelineTab({ project }: Props) {
                   })}
                   {s.endedAt && (
                     <span className="text-muted-foreground/60">
-                      {" "}— {getDuration(s.startedAt, s.endedAt)}
+                      {" "}- {getDuration(s.startedAt, s.endedAt)}
                     </span>
                   )}
                 </div>

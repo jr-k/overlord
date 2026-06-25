@@ -1,16 +1,15 @@
 export interface ModelOption {
-  /** Valeur passée à `claude --model`. Vide = défaut de la CLI. */
+  /** Value passed to `claude --model`. Empty means the CLI default. */
   id: string;
-  /** Libellé complet (SettingsTab). */
+  /** Full label shown in Settings. */
   label: string;
-  /** Libellé compact (barre du chat). */
+  /** Compact label shown in the chat header. */
   short: string;
 }
 
-// On utilise des ALIAS (opus / sonnet / haiku…) et non des IDs versionnés.
-// La CLI Claude les résout automatiquement vers la dernière version disponible
-// (cf. `claude --help`: « Provide an alias for the latest model »).
-// => aucune mise à jour manuelle à faire quand un nouveau modèle sort.
+// Use aliases (opus, sonnet, haiku) instead of versioned IDs.
+// Claude CLI resolves them to the latest available model automatically.
+// This avoids manual updates when new model versions are released.
 export const AVAILABLE_MODELS: ModelOption[] = [
   { id: "", label: "Default (Claude CLI default)", short: "Default" },
   { id: "opus", label: "Claude Opus (latest)", short: "Opus" },
@@ -20,8 +19,8 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   { id: "haiku", label: "Claude Haiku (latest)", short: "Haiku" },
 ];
 
-// Transforme l'ID complet renvoyé par la CLI (event system/init) en libellé lisible.
-// ex: "claude-opus-4-8-20260115" -> "Opus 4.8" ; "claude-sonnet-4-6[1m]" -> "Sonnet 4.6 (1M)"
+// Turn the full ID returned by the CLI `system/init` event into a readable label.
+// Example: "claude-opus-4-8-20260115" becomes "Opus 4.8".
 export function formatModelVersion(id: string): string {
   if (!id) return "";
   const oneM = /\[1m\]/i.test(id) ? " (1M)" : "";

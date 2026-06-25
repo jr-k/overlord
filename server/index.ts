@@ -171,13 +171,12 @@ app.get("/api/rtk/gain/:projectId", (c) => {
   }
 });
 
-// --- Résolution dynamique des versions de modèles (alias -> ID versionné) ---
-// On lance la CLI avec un alias et on lit le 1er event `system/init` (émis au
-// démarrage, AVANT toute inférence), puis on tue le process. C'est quasi gratuit
-// et ne requiert aucune clé API : on s'appuie sur l'auth de la CLI Claude.
+// Dynamically resolve model aliases to versioned IDs.
+// We start the CLI with an alias, read the first `system/init` event, then stop
+// the process. It is cheap and uses the existing Claude CLI authentication.
 interface ResolvedModelOption { id: string; label: string; short: string; version: string | null; }
 
-// opus/sonnet supportent le contexte 1M, pas haiku.
+// Opus and Sonnet support 1M context. Haiku does not.
 const MODEL_ALIASES = [
   { alias: "opus", oneM: true },
   { alias: "sonnet", oneM: true },
@@ -254,8 +253,8 @@ app.get("/api/models", async (c) => {
     }
   }
 
-  // On ne met en cache qu'un résultat où au moins un alias a été résolu, pour
-  // éviter de figer un échec transitoire (CLI absente, offline...).
+  // Cache only when at least one alias resolved, so transient CLI or network
+  // failures do not freeze the static fallback list.
   if (resolved.some((r) => r.id)) modelCache = { at: Date.now(), models };
   return c.json(models);
 });

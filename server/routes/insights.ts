@@ -12,7 +12,7 @@ const HOME_PREFIX = homedir().replace(/\//g, "-"); // e.g. "-Users-tristandebroi
 const IDLE_CAP_MS = 5 * 60 * 1000;
 // Approx Anthropic pricing for the Opus 4.x family ($ per 1M tokens). ~99% of
 // usage here is Opus; the handful of Sonnet/Haiku calls are priced at this rate
-// too (negligible error). Cost is an estimate — subscriptions may not bill it.
+// too (negligible error). Cost is an estimate. Subscriptions may not bill it.
 const PRICE = { input: 15, cacheRead: 1.5, cacheCreate: 18.75, output: 75 };
 
 // Claude Code encodes a project's cwd by replacing "/" with "-". Real folder

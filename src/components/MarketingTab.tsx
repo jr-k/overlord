@@ -30,7 +30,7 @@ export function MarketingTab({
 
   return (
     <div className="flex h-full">
-      {/* Side panel — project context */}
+      {/* Side panel: project context */}
       <aside className="w-72 shrink-0 border-r border-border overflow-y-auto bg-card/50">
         <div className="p-3">
           <button

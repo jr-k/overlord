@@ -33,7 +33,7 @@ app.get("/:projectId/status", (c) => {
   });
 });
 
-// POST /api/codegraph/:projectId/init — runs `codegraph init` then `codegraph index`
+// POST /api/codegraph/:projectId/init: runs `codegraph init` then `codegraph index`
 app.post("/:projectId/init", async (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
@@ -63,7 +63,7 @@ app.post("/:projectId/init", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/codegraph/:projectId/sync — incremental update
+// POST /api/codegraph/:projectId/sync: incremental update
 app.post("/:projectId/sync", async (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
@@ -78,7 +78,7 @@ app.post("/:projectId/sync", async (c) => {
   return c.json({ ok: true });
 });
 
-// DELETE /api/codegraph/:projectId — remove .codegraph
+// DELETE /api/codegraph/:projectId: remove .codegraph
 app.delete("/:projectId", async (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
