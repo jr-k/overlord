@@ -94,15 +94,15 @@ async function startBackend() {
     return preferredPort;
   }
 
-  const usesCustomNode = Boolean(process.env.OVERLORD_NODE_PATH);
-  const nodePath = process.env.OVERLORD_NODE_PATH || process.execPath;
+  const usesElectronNode = !process.env.OVERLORD_NODE_PATH && app.isPackaged;
+  const nodePath = process.env.OVERLORD_NODE_PATH || (usesElectronNode ? process.execPath : "node");
   const serverEntry = join(appRoot, "dist", "server", "index.js");
 
   console.log(`[overlord:electron] starting backend on port ${port}`);
   const serverProcess = spawn(nodePath, [serverEntry], {
     env: {
       ...process.env,
-      ...(usesCustomNode ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
+      ...(usesElectronNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
       PORT: String(port),
       OVERLORD_STATIC_ROOT: getStaticRoot(),
     },

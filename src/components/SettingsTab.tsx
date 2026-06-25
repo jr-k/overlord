@@ -7,15 +7,7 @@ import { Check, FolderEdit, Trash2, AlertTriangle } from "lucide-react";
 import { patch } from "../hooks/useApi.js";
 import type { Project } from "../types.js";
 
-export const AVAILABLE_MODELS = [
-  { id: "", label: "Default (Claude CLI default)" },
-  { id: "claude-opus-4-7", label: "Claude Opus 4.7" },
-  { id: "claude-opus-4-6[1m]", label: "Claude Opus 4.6 (1M context)" },
-  { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
-  { id: "claude-sonnet-4-6[1m]", label: "Claude Sonnet 4.6 (1M context)" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-];
+import { useModels } from "../hooks/useModels.js";
 
 export const DEFAULT_TOOLS = [
   "Edit", "Write", "Read", "Bash", "Glob", "Grep", "NotebookEdit",
@@ -41,6 +33,7 @@ interface Props {
 export function SettingsTab({ project }: Props) {
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt ?? "");
   const [model, setModel] = useState(project.model ?? "");
+  const models = useModels();
   const [learningsEnabled, setLearningsEnabled] = useState(project.learningsEnabled ?? true);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => {
     if (project.allowedTools) {
@@ -232,7 +225,7 @@ export function SettingsTab({ project }: Props) {
                 onChange={(e) => { setModel(e.target.value); setDirty(true); }}
                 className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
               >
-                {AVAILABLE_MODELS.map((m) => (
+                {models.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
                 ))}
               </select>

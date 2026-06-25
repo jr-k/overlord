@@ -52,6 +52,15 @@ execFileSync(npmCommand, ["install", "--omit=dev", "--no-audit", "--no-fund"], {
   stdio: "inherit",
 });
 
+execFileSync(
+  npmCommand,
+  ["rebuild", "better-sqlite3", `--runtime=electron`, `--target=${build.electronVersion}`, "--disturl=https://electronjs.org/headers"],
+  {
+    cwd: packageDir,
+    stdio: "inherit",
+  }
+);
+
 packageJson.dependencies = {};
 writeFileSync(join(packageDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
 rmSync(join(packageDir, "package-lock.json"), { force: true });
