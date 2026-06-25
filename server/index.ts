@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 import { WebSocketServer } from "ws";
 import { spawn, execSync } from "child_process";
+import { existsSync } from "fs";
 import { resolve } from "path";
 import { pathToFileURL } from "url";
 
@@ -33,8 +34,23 @@ import type { Channel } from "./agent/types.js";
 const PORT = Number(process.env.PORT) || 4747;
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const STATIC_ROOT = process.env.OVERLORD_STATIC_ROOT || resolve(process.cwd(), "dist/client");
+const RTK_SETUP_SCRIPT = resolve(process.cwd(), "scripts/setup-rtk.sh");
 
 initDb();
+
+function runRuntimeSetupHooks() {
+  if (process.env.RTK_SKIP === "1") return;
+  if (existsSync(RTK_SETUP_SCRIPT)) {
+    const proc = spawn("bash", [RTK_SETUP_SCRIPT], {
+      detached: true,
+      env: { ...process.env },
+      stdio: "ignore",
+    });
+    proc.unref();
+  }
+}
+
+runRuntimeSetupHooks();
 
 const app = new Hono();
 app.use("/api/*", cors());

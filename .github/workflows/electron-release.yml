@@ -40,6 +40,8 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        env:
+          RTK_SKIP: "1"
         run: npm ci
 
       - name: Install Linux packaging dependencies

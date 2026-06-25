@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { existsSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 
@@ -11,8 +11,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = new Hono();
 
+function resolveBin(name: string) {
+  const binName = process.platform === "win32" ? `${name}.cmd` : name;
+  const candidates = [
+    resolve(process.cwd(), "node_modules", ".bin", binName),
+    join(__dirname, "..", "..", "node_modules", ".bin", binName),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
 // Path to bundled codegraph binary
-const CODEGRAPH_BIN = join(__dirname, "..", "..", "node_modules", ".bin", "codegraph");
+const CODEGRAPH_BIN = resolveBin("codegraph");
 
 // In-memory tracking of which projects are currently being indexed
 const indexingProjects = new Set<number>();

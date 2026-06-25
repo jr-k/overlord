@@ -13,6 +13,7 @@ mkdirSync(packageDir, { recursive: true });
 cpSync(join(rootDir, "dist"), join(packageDir, "dist"), { recursive: true });
 cpSync(join(rootDir, "public"), join(packageDir, "public"), { recursive: true });
 cpSync(join(rootDir, "electron", "assets"), join(packageDir, "electron", "assets"), { recursive: true });
+cpSync(join(rootDir, "scripts"), join(packageDir, "scripts"), { recursive: true });
 
 const build = structuredClone(rootPackage.build);
 build.electronVersion = rootPackage.devDependencies.electron.replace(/^[^\d]*/, "");
@@ -25,6 +26,7 @@ build.files = [
   "dist/**/*",
   "electron/assets/**/*",
   "public/**/*",
+  "scripts/**/*",
   "node_modules/**/*",
   "package.json",
 ];

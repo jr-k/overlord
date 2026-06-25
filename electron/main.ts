@@ -100,6 +100,7 @@ async function startBackend() {
 
   console.log(`[overlord:electron] starting backend on port ${port}`);
   const serverProcess = spawn(nodePath, [serverEntry], {
+    cwd: appRoot,
     env: {
       ...process.env,
       ...(usesElectronNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
