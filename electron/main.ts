@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from "electron";
-import type { OpenDialogOptions } from "electron";
+import type { MessageBoxOptions, OpenDialogOptions } from "electron";
+import { autoUpdater } from "electron-updater";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createConnection, createServer } from "net";
 import { appendFileSync, mkdirSync } from "fs";
@@ -19,6 +20,7 @@ const iconPath = join(appRoot, "electron", "assets", "icon-128.png");
 
 let mainWindow: BrowserWindow | null = null;
 let serverHandle: OverlordServerHandle | null = null;
+let updateCheckStarted = false;
 
 function logBackend(chunk: Buffer, stream: "stdout" | "stderr") {
   const text = `[overlord:backend:${stream}] ${chunk.toString()}`;
@@ -37,6 +39,72 @@ function logBackend(chunk: Buffer, stream: "stdout" | "stderr") {
 
 function getStaticRoot() {
   return join(appRoot, "dist", "client");
+}
+
+function setupAutoUpdates() {
+  if (updateCheckStarted || isDev || !app.isPackaged) return;
+  updateCheckStarted = true;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on("update-available", async (info) => {
+    const options: MessageBoxOptions = {
+      type: "info",
+      buttons: ["Download and install", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Overlord update available",
+      message: "A new version of Overlord is available.",
+      detail: `Version ${info.version} is available. Download it now and install it automatically?`,
+    };
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+
+    if (result.response === 0) {
+      mainWindow?.setProgressBar(0);
+      mainWindow?.setTitle("Overlord - Downloading update");
+      void autoUpdater.downloadUpdate();
+    }
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    mainWindow?.setProgressBar(Math.max(0, Math.min(progress.percent / 100, 1)));
+    mainWindow?.setTitle(`Overlord - Downloading update ${Math.round(progress.percent)}%`);
+  });
+
+  autoUpdater.on("update-downloaded", async (info) => {
+    mainWindow?.setProgressBar(-1);
+    mainWindow?.setTitle("Overlord");
+    const options: MessageBoxOptions = {
+      type: "info",
+      buttons: ["Restart and install", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Overlord update ready",
+      message: "The update has been downloaded.",
+      detail: `Version ${info.version} is ready to install. Overlord will restart to apply it.`,
+    };
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+
+    if (result.response === 0) {
+      void shutdownBackend().finally(() => autoUpdater.quitAndInstall(false, true));
+    }
+  });
+
+  autoUpdater.on("error", (error) => {
+    mainWindow?.setProgressBar(-1);
+    mainWindow?.setTitle("Overlord");
+    console.error("[overlord:electron] update failed", error);
+  });
+
+  setTimeout(() => {
+    void autoUpdater.checkForUpdates();
+  }, 2500);
 }
 
 function getAvailablePort(preferredPort: number) {
@@ -274,6 +342,7 @@ app.whenReady().then(async () => {
   setupNotifications();
   const port = await startBackend();
   createWindow(port);
+  setupAutoUpdates();
   console.log(`[overlord:electron] window loading http://127.0.0.1:${port}`);
 }).catch((error) => {
   console.error("[overlord:electron] startup failed", error);

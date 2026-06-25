@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Project multiplexer with Claude integration",
   "author": {
     "name": "Overlord",
@@ -39,6 +39,11 @@
     },
     "npmRebuild": false,
     "compression": "normal",
+    "publish": {
+      "provider": "github",
+      "owner": "poptocrack",
+      "repo": "overlord"
+    },
     "files": [
       "dist/**/*",
       "electron/assets/**/*",
@@ -175,6 +180,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",
+    "electron-updater": "^6.8.9",
     "hono": "^4.12.10",
     "lucide-react": "^1.7.0",
     "open": "^11.0.0",
