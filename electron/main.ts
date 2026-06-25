@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { createConnection, createServer } from "net";
@@ -157,6 +157,22 @@ function createWindow(port: number) {
   const url = isDev
     ? "http://127.0.0.1:4748"
     : `http://127.0.0.1:${port}`;
+
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (/^https?:\/\//i.test(targetUrl)) {
+      void shell.openExternal(targetUrl);
+      return { action: "deny" };
+    }
+
+    return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (targetUrl !== url && /^https?:\/\//i.test(targetUrl)) {
+      event.preventDefault();
+      void shell.openExternal(targetUrl);
+    }
+  });
 
   void mainWindow.loadURL(url);
   mainWindow.on("closed", () => {
