@@ -11,6 +11,7 @@ import { OpenInEditorButton } from "./components/OpenInEditorButton.js";
 import { OpenTerminalButton } from "./components/OpenTerminalButton.js";
 import { TodosTab } from "./components/TodosTab.js";
 import { WorkspacesTab } from "./components/WorkspacesTab.js";
+import { InsightsTab } from "./components/InsightsTab.js";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -19,7 +20,7 @@ import { ExternalLink } from "lucide-react";
 
 export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
-const VISIBLE_TABS = ["chat", "todos", "marketing", "skills", "summary", "settings"] as const;
+const VISIBLE_TABS = ["chat", "todos", "marketing", "skills", "summary", "insights", "settings"] as const;
 type VisibleTab = typeof VISIBLE_TABS[number];
 
 function normalizeTab(value: string | null | undefined): VisibleTab {
@@ -166,34 +167,95 @@ export function App() {
     });
   }, []);
 
-  // Fetch initial agent statuses + listen for changes via WS
+  // Keep screen awake while at least one agent is running
   useEffect(() => {
-    fetch("/api/agent/statuses")
-      .then((r) => r.json())
-      .then((data: Record<string, string>) => {
-        const mapped: AgentStatusMap = {};
-        for (const [k, v] of Object.entries(data)) {
-          mapped[Number(k)] = v as AgentStatusMap[number];
-        }
-        setAgentStatuses(mapped);
-      })
-      .catch(() => {});
+    const anyRunning = Object.values(agentStatuses).some((s) => s === "running");
+    if (!anyRunning) return;
+    if (!("wakeLock" in navigator)) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-    statusWsRef.current = ws;
+    let wakeLock: WakeLockSentinel | null = null;
+    let cancelled = false;
 
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "agent:status_change") {
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [msg.projectId]: msg.status,
-        }));
+    const acquire = async () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      try {
+        wakeLock = await (navigator as any).wakeLock.request("screen");
+        wakeLock?.addEventListener("release", () => { wakeLock = null; });
+      } catch {
+        // ignore (e.g. tab hidden, OS denied)
       }
     };
 
-    return () => ws.close();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && !wakeLock) acquire();
+    };
+
+    acquire();
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibility);
+      wakeLock?.release().catch(() => {});
+    };
+  }, [agentStatuses]);
+
+  // Fetch initial agent statuses + listen for changes via WS (with auto-reconnect)
+  useEffect(() => {
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
+    const refetchStatuses = () => {
+      fetch("/api/agent/statuses")
+        .then((r) => r.json())
+        .then((data: Record<string, string>) => {
+          const mapped: AgentStatusMap = {};
+          for (const [k, v] of Object.entries(data)) {
+            mapped[Number(k)] = v as AgentStatusMap[number];
+          }
+          setAgentStatuses(mapped);
+        })
+        .catch(() => {});
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      statusWsRef.current = ws;
+
+      ws.onopen = () => {
+        attempts = 0;
+        // Resync after reconnect — server-side state may have changed
+        refetchStatuses();
+      };
+
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "agent:status_change") {
+          setAgentStatuses((prev) => ({
+            ...prev,
+            [msg.projectId]: msg.status,
+          }));
+        }
+      };
+
+      ws.onclose = () => {
+        if (cancelled) return;
+        const delay = Math.min(10000, 500 * Math.pow(2, attempts++));
+        reconnectTimer = setTimeout(connect, delay);
+      };
+    };
+
+    refetchStatuses();
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      statusWsRef.current?.close();
+    };
   }, []);
 
   const handleScan = useCallback(async () => {
@@ -276,6 +338,7 @@ export function App() {
                     <TabsTrigger value="marketing">Marketing</TabsTrigger>
                     <TabsTrigger value="skills">Skills</TabsTrigger>
                     <TabsTrigger value="summary">Summary</TabsTrigger>
+                    <TabsTrigger value="insights">Insights</TabsTrigger>
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -318,6 +381,11 @@ export function App() {
                 {tab === "workspaces" && (
                   <div className="h-full overflow-auto">
                     <WorkspacesTab project={selected} />
+                  </div>
+                )}
+                {tab === "insights" && (
+                  <div className="h-full overflow-auto">
+                    <InsightsTab />
                   </div>
                 )}
                 {tab === "chat" && (
