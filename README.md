@@ -112,6 +112,16 @@ npm run dist:electron:win    # Package Windows binaries
 npm run dist:electron:linux  # Package Linux binaries
 ```
 
+## macOS Release Install
+
+The macOS builds published on GitHub are unsigned. If macOS says `Overlord` is damaged after you install it from the DMG, remove the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Overlord.app
+```
+
+Then open Overlord again from `/Applications`.
+
 ## Data Storage
 
 All data is stored in `~/.overlord/overlord.db` (SQLite). This includes:

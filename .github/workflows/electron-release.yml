@@ -123,9 +123,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
+          cat > release-notes.md <<EOF
+          Overlord desktop binaries for v${VERSION}.
+
+          macOS builds are unsigned. If macOS says \`Overlord\` is damaged after installing it from the DMG, run:
+
+          \`\`\`bash
+          xattr -dr com.apple.quarantine /Applications/Overlord.app
+          \`\`\`
+
+          Then open Overlord again from \`/Applications\`.
+          EOF
           gh release create "v${VERSION}" \
             --title "Release v${VERSION}" \
-            --notes "Overlord desktop binaries for v${VERSION}."
+            --notes-file release-notes.md
 
       - name: Upload release assets
         env:
