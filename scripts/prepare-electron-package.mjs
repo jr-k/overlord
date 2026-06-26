@@ -77,6 +77,11 @@ function runNpm(args) {
 
 runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"]);
 
+execFileSync(process.execPath, [join(packageDir, "scripts", "patch-codegraph-visualizer.mjs")], {
+  cwd: packageDir,
+  stdio: "inherit",
+});
+
 execFileSync(
   process.execPath,
   [

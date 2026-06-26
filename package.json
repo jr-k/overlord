@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Project multiplexer with Claude integration",
   "author": {
     "name": "Overlord",
@@ -17,7 +17,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
     "dev:electron": "npm run build:electron && ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 electron dist/electron/main.js",
-    "postinstall": "bash scripts/setup-rtk.sh",
+    "postinstall": "bash scripts/setup-rtk.sh && node scripts/patch-codegraph-visualizer.mjs",
     "build": "vite build",
     "build:electron": "vite build && tsc",
     "prepare:electron-package": "node scripts/prepare-electron-package.mjs",
