@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from "electron";
 import type { OpenDialogOptions } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import { createConnection, createServer } from "net";
+import { createServer } from "net";
 import { appendFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
+import { homedir } from "os";
+import { delimiter, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 type OverlordServerHandle = {
@@ -58,26 +59,22 @@ function getAvailablePort(preferredPort: number) {
   });
 }
 
-function waitForBackend(port: number) {
+function waitForOverlordBackend(port: number) {
   return new Promise<void>((resolve, reject) => {
     let attempts = 0;
     const maxAttempts = 80;
 
-    const tryConnect = () => {
+    const tryConnect = async () => {
       attempts += 1;
-      const socket = createConnection({ host: "127.0.0.1", port });
-      socket.once("connect", () => {
-        socket.end();
+      if (await isOverlordBackend(port)) {
         resolve();
-      });
-      socket.once("error", () => {
-        socket.destroy();
-        if (attempts >= maxAttempts) {
-          reject(new Error(`Backend did not start on port ${port}`));
-          return;
-        }
-        setTimeout(tryConnect, 100);
-      });
+        return;
+      }
+      if (attempts >= maxAttempts) {
+        reject(new Error(`Backend did not start on port ${port}`));
+        return;
+      }
+      setTimeout(tryConnect, 100);
     };
 
     tryConnect();
@@ -89,10 +86,12 @@ async function isOverlordBackend(port: number) {
   const timeout = setTimeout(() => controller.abort(), 1000);
 
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
       signal: controller.signal,
     });
-    return response.ok;
+    if (!response.ok) return false;
+    const body = await response.json().catch(() => null);
+    return body?.ok === true && body?.name === "overlord";
   } catch {
     return false;
   } finally {
@@ -100,11 +99,40 @@ async function isOverlordBackend(port: number) {
   }
 }
 
+function buildBackendEnv(port: number): NodeJS.ProcessEnv {
+  const userHome = homedir();
+  const extraPath = [
+    join(userHome, ".local", "bin"),
+    join(userHome, ".claude", "local"),
+    join(userHome, ".bun", "bin"),
+    join(userHome, ".cargo", "bin"),
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ];
+
+  const existingPath = process.env.PATH ?? "";
+  const path = [...extraPath, ...existingPath.split(delimiter).filter(Boolean)]
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(delimiter);
+
+  return {
+    ...process.env,
+    PATH: path,
+    PORT: String(port),
+    OVERLORD_STATIC_ROOT: getStaticRoot(),
+  };
+}
+
 async function startBackend() {
   const preferredPort = Number(process.env.PORT) || 4747;
   const port = await getAvailablePort(preferredPort);
 
-  if (port !== preferredPort && await isOverlordBackend(preferredPort)) {
+  if (isDev && port !== preferredPort && await isOverlordBackend(preferredPort)) {
     console.log(`[overlord:electron] reusing existing backend on port ${preferredPort}`);
     serverHandle = { port: preferredPort, external: true };
     return preferredPort;
@@ -118,10 +146,8 @@ async function startBackend() {
   const serverProcess = spawn(nodePath, [serverEntry], {
     cwd: appRoot,
     env: {
-      ...process.env,
+      ...buildBackendEnv(port),
       ...(usesElectronNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-      PORT: String(port),
-      OVERLORD_STATIC_ROOT: getStaticRoot(),
     },
     stdio: "pipe",
   });
@@ -137,7 +163,7 @@ async function startBackend() {
   serverHandle = handle;
 
   await Promise.race([
-    waitForBackend(port),
+    waitForOverlordBackend(port),
     new Promise<never>((_, reject) => {
       serverProcess.once("exit", (code, signal) => {
         reject(new Error(`Backend exited before startup (code=${code}, signal=${signal})`));

@@ -174,6 +174,7 @@ export function sendMessage(session: AgentSession, message: string) {
     resetActivityTimer();
     const text = data.toString();
     console.log(`[agent:${session.projectId}] stderr: ${text.slice(0, 500)}`);
+    broadcast(session, { type: "agent:raw", data: text });
     if (text.includes("No conversation found with session ID")) {
       console.log(`[agent:${session.projectId}] stale session, clearing claudeSessionId`);
       staleSessionDetected = true;
@@ -199,6 +200,7 @@ export function sendMessage(session: AgentSession, message: string) {
     console.log(`[agent:${session.projectId}] process error: ${err.message}`);
     session.currentProcess = null;
     session.status = "idle";
+    broadcast(session, { type: "agent:raw", data: `Claude failed to start: ${err.message}` });
     broadcast(session, { type: "agent:done", code: 1 });
     broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "error" });
   });

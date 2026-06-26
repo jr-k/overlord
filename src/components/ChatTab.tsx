@@ -1046,6 +1046,14 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             currentTurnRef.current.numTurns = ev.num_turns;
           }
         }
+      } else if (msg.type === "agent:raw") {
+        const text = typeof msg.data === "string" ? msg.data.trim() : "";
+        if (text) {
+          setEntries((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: "assistant", content: text },
+          ]);
+        }
       } else if (msg.type === "agent:done") {
         // Finalize turn timing
         if (currentTurnRef.current) {

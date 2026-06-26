@@ -66,6 +66,10 @@ app.use("/api/*", async (c, next) => {
   await next();
 });
 
+app.get("/api/health", (c) => {
+  return c.json({ ok: true, name: "overlord" });
+});
+
 app.route("/api/projects", projectRoutes);
 app.route("/api/sessions", sessionRoutes);
 app.route("/api/conversations", conversationRoutes);
