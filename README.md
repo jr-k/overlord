@@ -1,17 +1,21 @@
+<p align="center">
+  <img src="docs/overlord-banner.png" width="60%" alt="Overlord" />
+</p>
+
 # Overlord
 
-A local web-based project multiplexer with integrated Claude AI agents. Manage multiple projects, chat with Claude in the context of each project, track todos, and run terminals — all from one interface.
+A local web-based project multiplexer with integrated Claude AI agents. Manage multiple projects, chat with Claude in the context of each project, track todos, and run terminals from one interface.
 
 ## Features
 
-- **Multi-project management** — Scan a directory for git repos, switch between them instantly
-- **Claude AI chat per project** — Chat with Claude scoped to each project's codebase, with streaming responses and tool access
-- **Todos / Backlog** — Track ideas and tasks per project, launch them directly into the chat
-- **Integrated terminal** — Run commands in each project's directory, with tab completion and multi-tab support
-- **Monorepo support** — Detect and display workspace packages (pnpm, yarn, npm workspaces, nx, lerna)
-- **Persistent state** — Chat history, todos, and project settings survive server restarts (SQLite)
-- **MCP server** — Claude agents can read/write todos via the Overlord MCP protocol
-- **Auto-summaries** — Project summaries generated automatically after each conversation
+- **Multi-project management** lets you scan a directory for git repositories and switch between them instantly.
+- **Claude AI chat per project** gives each project its own Claude conversation scoped to that codebase, with streaming responses and tool access.
+- **Todos / Backlog** tracks ideas and tasks per project, then lets you launch them directly into the chat.
+- **Integrated terminal access** opens your preferred terminal application in the selected project's directory.
+- **Monorepo support** detects workspace packages from pnpm, yarn, npm workspaces, nx, and lerna.
+- **Persistent state** keeps chat history, todos, and project settings across server restarts with SQLite.
+- **MCP server support** lets Claude agents read and write Overlord todos through the MCP protocol.
+- **Auto-summaries** generate project summaries automatically after conversations.
 
 ## Prerequisites
 
@@ -36,7 +40,7 @@ npm run dev
 
 `npm install` automatically sets up [RTK](https://github.com/rtk-ai/rtk) (Rust Token Killer) which reduces token consumption by 60-90% for Claude agents. If you prefer to skip this, set `RTK_SKIP=1` before installing.
 
-On first launch, click **"Scanner les projets"** in the sidebar to detect git repositories.
+On first launch, click **"Scan projects"** in the sidebar to detect git repositories.
 
 ## Configuration
 
@@ -72,35 +76,11 @@ CLAUDE_PATH=/path/to/claude npm run dev
 
 ## Project Structure
 
-```
-overlord/
-├── server/                # Backend (Hono + SQLite)
-│   ├── index.ts           # Main server, WebSocket, agent management
-│   ├── mcp.ts             # MCP server for Claude tool integration
-│   ├── workspaces.ts      # Monorepo workspace detection
-│   ├── db/
-│   │   ├── schema.ts      # Drizzle ORM schema
-│   │   └── index.ts       # SQLite init + migrations
-│   └── routes/
-│       ├── projects.ts    # Project CRUD + git scan
-│       ├── sessions.ts    # Session history
-│       ├── conversations.ts # Chat conversations
-│       └── todos.ts       # Todo CRUD
-├── src/                   # Frontend (React + Vite + shadcn/ui)
-│   ├── App.tsx            # Main layout
-│   ├── components/
-│   │   ├── Sidebar.tsx    # Project list with favorites/search
-│   │   ├── ChatTab.tsx    # Claude chat with streaming
-│   │   ├── TodosTab.tsx   # Todo management
-│   │   ├── TerminalTab.tsx # Integrated terminal
-│   │   ├── SummaryTab.tsx # Project summary
-│   │   ├── WorkspacesTab.tsx # Monorepo workspace view
-│   │   └── TimelineTab.tsx
-│   ├── hooks/
-│   └── types.ts
-├── bin/overlord.js        # CLI entry point
-└── package.json
-```
+The `server/` directory contains the Hono backend, SQLite setup, routes, WebSocket handling, MCP integration, and Claude agent orchestration.
+
+The `src/` directory contains the React frontend, including the main layout, sidebar, chat, todos, settings, skills, summaries, and reusable UI components.
+
+The `bin/overlord.js` file is the CLI entry point, while `package.json` defines scripts and dependencies.
 
 ## Tech Stack
 
@@ -116,11 +96,31 @@ overlord/
 ## Scripts
 
 ```bash
+# Web build and release
 npm run dev          # Start backend + frontend (hot reload)
 npm run dev:server   # Backend only (with watch)
 npm run dev:client   # Frontend only
 npm run build        # Production build
+
+# Electron build and release
+npm run build:electron       # Build frontend, backend, and Electron entrypoints
+npm run dev:electron         # Build and launch the Electron desktop app
+npm run prepare:electron-package # Prepare the isolated Electron packaging folder
+npm run dist:electron        # Package desktop binaries for the current platform
+npm run dist:electron:mac    # Package macOS binaries
+npm run dist:electron:win    # Package Windows binaries
+npm run dist:electron:linux  # Package Linux binaries
 ```
+
+## macOS Release Install
+
+The macOS builds published on GitHub are unsigned. If macOS says `Overlord` is damaged after you install it from the DMG, remove the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Overlord.app
+```
+
+Then open Overlord again from `/Applications`.
 
 ## Data Storage
 

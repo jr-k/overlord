@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 import { db } from "../db/index.js";
 import { conversations, messages, projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -17,6 +18,22 @@ import type { AgentSession } from "./types.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PORT = Number(process.env.PORT) || 4747;
+
+function getOverlordMcpCommand() {
+  const builtMcp = resolve(__dirname, "..", "mcp.js");
+  if (existsSync(builtMcp)) {
+    return {
+      command: process.execPath,
+      args: [builtMcp],
+    };
+  }
+
+  const tsxBinName = process.platform === "win32" ? "tsx.cmd" : "tsx";
+  return {
+    command: resolve(process.cwd(), "node_modules", ".bin", tsxBinName),
+    args: [resolve(__dirname, "..", "mcp.ts")],
+  };
+}
 
 export function sendMessage(session: AgentSession, message: string) {
   if (session.currentProcess) {
@@ -36,11 +53,11 @@ export function sendMessage(session: AgentSession, message: string) {
 
   broadcast(session, { type: "agent:snapshot", snapshotSha, eventIndex, message });
 
-  const tsxBin = resolve(__dirname, "..", "..", "node_modules", ".bin", "tsx");
+  const overlordMcp = getOverlordMcpCommand();
   const mcpServers: Record<string, any> = {
     overlord: {
-      command: tsxBin,
-      args: [resolve(__dirname, "..", "mcp.ts")],
+      command: overlordMcp.command,
+      args: overlordMcp.args,
       env: { OVERLORD_PORT: String(PORT) },
     },
   };
@@ -157,6 +174,7 @@ export function sendMessage(session: AgentSession, message: string) {
     resetActivityTimer();
     const text = data.toString();
     console.log(`[agent:${session.projectId}] stderr: ${text.slice(0, 500)}`);
+    broadcast(session, { type: "agent:raw", data: text });
     if (text.includes("No conversation found with session ID")) {
       console.log(`[agent:${session.projectId}] stale session, clearing claudeSessionId`);
       staleSessionDetected = true;
@@ -165,14 +183,14 @@ export function sendMessage(session: AgentSession, message: string) {
   });
 
   let activityTimer = setTimeout(() => {
-    console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+    console.log(`[agent:${session.projectId}] timeout: no activity for 5 minutes, killing`);
     proc.kill("SIGTERM");
   }, 5 * 60 * 1000);
 
   const resetActivityTimer = () => {
     clearTimeout(activityTimer);
     activityTimer = setTimeout(() => {
-      console.log(`[agent:${session.projectId}] timeout — no activity for 5 minutes, killing`);
+      console.log(`[agent:${session.projectId}] timeout: no activity for 5 minutes, killing`);
       proc.kill("SIGTERM");
     }, 5 * 60 * 1000);
   };
@@ -182,6 +200,7 @@ export function sendMessage(session: AgentSession, message: string) {
     console.log(`[agent:${session.projectId}] process error: ${err.message}`);
     session.currentProcess = null;
     session.status = "idle";
+    broadcast(session, { type: "agent:raw", data: `Claude failed to start: ${err.message}` });
     broadcast(session, { type: "agent:done", code: 1 });
     broadcastAll({ type: "agent:status_change", projectId: session.projectId, status: "error" });
   });

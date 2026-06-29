@@ -81,7 +81,7 @@ export function detectWorkspaces(projectPath: string): WorkspaceInfo {
     } catch {}
   }
 
-  // Fallback: not a monorepo — list immediate subfolders as scope candidates.
+  // Fallback: not a monorepo. List immediate subfolders as scope candidates.
   // Useful for "container" project dirs that hold loose subprojects.
   return {
     type: "subfolders",

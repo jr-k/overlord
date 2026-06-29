@@ -62,7 +62,7 @@ export function WorkspacesTab({ project }: Props) {
       <div className="flex flex-col items-center justify-center gap-3 py-16">
         <Layers className="h-8 w-8 text-muted-foreground/50" />
         <p className="text-sm text-muted-foreground">
-          Ce projet n'est pas un monorepo.
+          This project is not a monorepo.
         </p>
         <p className="text-xs text-muted-foreground/60">
           Supporte: pnpm workspaces, yarn workspaces, npm workspaces, nx, lerna

@@ -58,8 +58,8 @@ export function attachWsHandlers(wss: WebSocketServer) {
   });
 }
 
-// Broadcast the current queue to all subscribers of a session, or — if no
-// session exists yet — directly to the requesting socket.
+// Broadcast the current queue to all subscribers of a session. If no session
+// exists yet, send it directly to the requesting socket.
 function emitQueueState(ws: WebSocket, projectId: number, channel: Channel) {
   const session = agentSessions.get(sessionKey(projectId, channel));
   if (session) {
@@ -182,7 +182,7 @@ function handleWsMessage(ws: WebSocket, msg: WsMessage, wsSubscriptions: Map<Web
     session.subscribers.add(ws);
     wsSubscriptions.set(ws, key);
 
-    // Agent already busy (client status desync) — queue instead of dropping.
+    // Agent already busy because of client status desync. Queue instead of dropping.
     if (session.currentProcess) {
       enqueue(msg.projectId, channel, msg.message);
       broadcastQueueState(session);

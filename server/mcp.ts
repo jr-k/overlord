@@ -121,7 +121,7 @@ server.tool(
 
 server.tool(
   "overlord_ask_project",
-  "Ask a question to the Claude agent of another project. The agent runs in that project's directory with full access to its codebase. Use this to get information, analysis, or help from the context of another project. The agent will read files, run commands, and answer based on that project's code. This spawns a separate Claude instance so it costs tokens — use for meaningful cross-project questions, not trivial lookups.",
+  "Ask a question to the Claude agent of another project. The agent runs in that project's directory with full access to its codebase. Use this to get information, analysis, or help from the context of another project. The agent will read files, run commands, and answer based on that project's code. This spawns a separate Claude instance, so it costs tokens. Use it for meaningful cross-project questions, not trivial lookups.",
   {
     projectId: z.number().describe("The target project ID (use overlord_list_projects to find it)"),
     question: z.string().describe("The question to ask the other project's agent"),

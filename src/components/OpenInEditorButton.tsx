@@ -11,6 +11,15 @@ interface EditorInfo {
 
 let editorsCache: EditorInfo[] | null = null;
 
+const MAC_FALLBACK_EDITORS: EditorInfo[] = [
+  { id: "cursor", name: "Cursor", cmd: "cursor" },
+  { id: "vscode", name: "VS Code", cmd: "code" },
+];
+
+function getFallbackEditors() {
+  return navigator.platform.toLowerCase().includes("mac") ? MAC_FALLBACK_EDITORS : [];
+}
+
 function useEditors() {
   const [editors, setEditors] = useState<EditorInfo[]>(editorsCache ?? []);
   useEffect(() => {
@@ -18,10 +27,11 @@ function useEditors() {
     fetch("/api/editors")
       .then((r) => r.json())
       .then((data) => {
-        editorsCache = data;
-        setEditors(data);
+        const nextEditors = Array.isArray(data) && data.length > 0 ? data : getFallbackEditors();
+        editorsCache = nextEditors;
+        setEditors(nextEditors);
       })
-      .catch(() => {});
+      .catch(() => setEditors(getFallbackEditors()));
   }, []);
   return editors;
 }
@@ -69,8 +79,8 @@ export function OpenInEditorButton({ path, className }: { path: string; classNam
     <div className="relative">
       <Tooltip>
         <TooltipTrigger>
-          <span
-            role="button"
+          <button
+            type="button"
             onClick={handleClick}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -78,16 +88,16 @@ export function OpenInEditorButton({ path, className }: { path: string; classNam
               setShowPicker(true);
             }}
             className={cn(
-              "text-muted-foreground hover:text-foreground transition-colors cursor-pointer",
+              "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
               className
             )}
           >
             <Code2 className="h-3.5 w-3.5" />
-          </span>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs z-[100]">
-          {preferredEditor ? `Ouvrir dans ${preferredEditor.name}` : "Ouvrir dans un éditeur"}
-          <span className="text-muted-foreground ml-1">(clic droit pour changer)</span>
+          {preferredEditor ? `Open in ${preferredEditor.name}` : "Open in an editor"}
+          <span className="text-muted-foreground ml-1">(right-click to change)</span>
         </TooltipContent>
       </Tooltip>
 
@@ -106,7 +116,7 @@ export function OpenInEditorButton({ path, className }: { path: string; classNam
               >
                 {ed.name}
                 {preferred === ed.id && (
-                  <span className="ml-auto text-[10px] text-muted-foreground">défaut</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground">default</span>
                 )}
               </button>
             ))}

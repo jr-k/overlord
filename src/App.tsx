@@ -8,22 +8,70 @@ import { SettingsTab } from "./components/SettingsTab.js";
 import { MarketingTab } from "./components/MarketingTab.js";
 import { SkillsTab } from "./components/SkillsTab.js";
 import { OpenInEditorButton } from "./components/OpenInEditorButton.js";
+import { OpenTerminalButton } from "./components/OpenTerminalButton.js";
 import { TodosTab } from "./components/TodosTab.js";
-import { TerminalTab } from "./components/TerminalTab.js";
 import { WorkspacesTab } from "./components/WorkspacesTab.js";
+import { WorkspaceOnboarding } from "./components/WorkspaceOnboarding.js";
 import { InsightsTab } from "./components/InsightsTab.js";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Menu } from "lucide-react";
 
 export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
+type WorkspaceSettings = {
+  path: string;
+  configured: boolean;
+  source: "user" | "env" | "default";
+};
+
+const VISIBLE_TABS = ["chat", "todos", "marketing", "skills", "summary", "insights", "settings"] as const;
+type VisibleTab = typeof VISIBLE_TABS[number];
+
+const TAB_LABELS: Record<VisibleTab, string> = {
+  chat: "Chat",
+  todos: "Todos",
+  marketing: "Marketing",
+  skills: "Skills",
+  summary: "Summary",
+  insights: "Insights",
+  settings: "Settings",
+};
+
+function normalizeTab(value: string | null | undefined): VisibleTab {
+  return VISIBLE_TABS.includes(value as VisibleTab) ? (value as VisibleTab) : "chat";
+}
+
+function readRouteFromPathname() {
+  const [projectSegment, tabSegment] = window.location.pathname
+    .split("/")
+    .filter(Boolean);
+  const decodedProjectSegment = projectSegment ? decodeURIComponent(projectSegment) : null;
+  const idMatch = decodedProjectSegment?.match(/^(\d+)(?:-|$)/);
+
+  return {
+    projectId: idMatch ? Number(idMatch[1]) : null,
+    projectName: decodedProjectSegment,
+    tab: normalizeTab(tabSegment),
+  };
+}
+
+function getProjectRoute(project: Project, tab: string) {
+  return `/${encodeURIComponent(`${project.id}-${project.name}`)}/${normalizeTab(tab)}`;
+}
+
 export function App() {
-  const { data: projects, refetch } = useApi<Project[]>("/projects");
+  const { data: workspaceSettings, refetch: refetchWorkspaceSettings } = useApi<WorkspaceSettings>("/settings/workspace");
+  const { data: projects, refetch } = useApi<Project[]>("/projects?hidden=true");
   const [selected, setSelected] = useState<Project | null>(null);
-  const [tab, setTab] = useState(() => localStorage.getItem("overlord:tab") ?? "chat");
+  const [tab, setTab] = useState<string>(() => {
+    const route = readRouteFromPathname();
+    return route.projectName ? route.tab : normalizeTab(localStorage.getItem("overlord:tab"));
+  });
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
   const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem("overlord:chatInputs") ?? "{}");
@@ -45,9 +93,22 @@ export function App() {
   });
   const statusWsRef = useRef<WebSocket | null>(null);
 
-  // Restore selected project from localStorage when projects load
+  // Restore selected project from URL first, then localStorage.
   useEffect(() => {
     if (restored || !projects?.length) return;
+    const route = readRouteFromPathname();
+    if (route.projectName) {
+      const found = route.projectId
+        ? projects.find((p) => p.id === route.projectId)
+        : projects.find((p) => p.name === route.projectName);
+      if (found) {
+        setSelected(found);
+        setTab(route.tab);
+        setRestored(true);
+        return;
+      }
+    }
+
     const savedId = localStorage.getItem("overlord:projectId");
     if (savedId) {
       const found = projects.find((p) => p.id === Number(savedId));
@@ -55,6 +116,32 @@ export function App() {
     }
     setRestored(true);
   }, [projects, restored]);
+
+  useEffect(() => {
+    if (!projects?.length) return;
+
+    const handlePopState = () => {
+      const route = readRouteFromPathname();
+      if (!route.projectName) return;
+
+      const found = route.projectId
+        ? projects.find((p) => p.id === route.projectId)
+        : projects.find((p) => p.name === route.projectName);
+      if (!found) return;
+
+      setSelected(found);
+      setTab(route.tab);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [projects]);
+
+  useEffect(() => {
+    if (!projects) return;
+    if (selected && projects.some((project) => project.id === selected.id)) return;
+    setSelected(projects[0] ?? null);
+  }, [projects, selected]);
 
   // Persist selected project + fetch remote URL
   useEffect(() => {
@@ -73,6 +160,15 @@ export function App() {
   useEffect(() => {
     localStorage.setItem("overlord:tab", tab);
   }, [tab]);
+
+  useEffect(() => {
+    if (!restored || !selected) return;
+
+    const nextPath = getProjectRoute(selected, tab);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, "", nextPath);
+    }
+  }, [restored, selected, tab]);
 
   // Persist chat inputs (debounced to not lag the input during typing)
   useEffect(() => {
@@ -164,7 +260,7 @@ export function App() {
 
       ws.onopen = () => {
         attempts = 0;
-        // Resync after reconnect — server-side state may have changed
+        // Resync after reconnect. Server-side state may have changed.
         refetchStatuses();
       };
 
@@ -200,12 +296,19 @@ export function App() {
     refetch();
   }, [refetch]);
 
+  const handleWorkspaceConfigured = useCallback(async () => {
+    setWorkspaceModalOpen(false);
+    refetchWorkspaceSettings();
+    setSelected(null);
+    await post("/projects/scan");
+    refetch();
+  }, [refetch, refetchWorkspaceSettings]);
+
   const handleSelect = useCallback((p: Project) => {
     setSelected(p);
-    setTab("chat");
   }, []);
 
-  // "Lancer" from Todos: put text in chat input and switch to chat tab
+  // "Start" from Todos: put text in chat input and switch to chat tab
   const handleSendToChat = useCallback(
     (message: string) => {
       if (!selected) return;
@@ -215,7 +318,7 @@ export function App() {
     [selected]
   );
 
-  // Stable callbacks for the chat/marketing inputs — keyed by current project
+  // Stable callbacks for chat and marketing inputs, keyed by current project.
   const handleChatInputChange = useCallback(
     (v: string) => {
       if (!selected) return;
@@ -231,6 +334,11 @@ export function App() {
     [selected]
   );
 
+  const handleTabChange = useCallback((value: string) => {
+    setTab(normalizeTab(value));
+    setTabMenuOpen(false);
+  }, []);
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -241,15 +349,23 @@ export function App() {
           onSelect={handleSelect}
           onScan={handleScan}
           onProjectUpdate={refetch}
+          onOpenWorkspaceSettings={() => setWorkspaceModalOpen(true)}
         />
+        {workspaceSettings && (!workspaceSettings.configured || workspaceModalOpen) && (
+          <WorkspaceOnboarding
+            initialPath={workspaceSettings.path}
+            onComplete={handleWorkspaceConfigured}
+            onCancel={workspaceSettings.configured ? () => setWorkspaceModalOpen(false) : undefined}
+          />
+        )}
         <SidebarInset className="flex flex-col overflow-hidden min-h-0 h-screen">
           {selected ? (
             <div className="flex flex-1 flex-col overflow-hidden">
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-                <SidebarTrigger className="-ml-1" />
-                <Separator orientation="vertical" className="mr-2 !h-4" />
-                <h2 className="flex-1 flex items-center gap-2 text-sm font-semibold">
-                  {selected.name}
+              <header className="desktop-titlebar-drag flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+                <SidebarTrigger className="-ml-2" />
+                <Separator orientation="vertical" className="mr-2" />
+                <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold">
+                  <span className="truncate">{selected.name}</span>
                   {remoteUrl && (
                     <Tooltip>
                       <TooltipTrigger>
@@ -267,20 +383,47 @@ export function App() {
                     </Tooltip>
                   )}
                   <OpenInEditorButton path={selected.path} />
+                  <OpenTerminalButton path={selected.path} />
                 </h2>
-                <Tabs value={tab} onValueChange={setTab}>
+                <Tabs value={tab} onValueChange={handleTabChange} className="desktop-titlebar-no-drag hidden xl:flex">
                   <TabsList>
                     <TabsTrigger value="chat">Chat</TabsTrigger>
                     <TabsTrigger value="todos">Todos</TabsTrigger>
                     <TabsTrigger value="marketing">Marketing</TabsTrigger>
                     <TabsTrigger value="skills">Skills</TabsTrigger>
-                    <TabsTrigger value="workspaces">Workspaces</TabsTrigger>
-                    <TabsTrigger value="summary">Resume</TabsTrigger>
+                    <TabsTrigger value="summary">Summary</TabsTrigger>
                     <TabsTrigger value="insights">Insights</TabsTrigger>
-                    <TabsTrigger value="terminal">Terminal</TabsTrigger>
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
                 </Tabs>
+                <div className="desktop-titlebar-no-drag relative xl:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setTabMenuOpen((open) => !open)}
+                    className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-secondary px-2 text-xs text-muted-foreground hover:text-foreground"
+                    aria-label="Open section menu"
+                    aria-expanded={tabMenuOpen}
+                  >
+                    <Menu className="h-4 w-4" />
+                    <span className="hidden sm:inline">{TAB_LABELS[normalizeTab(tab)]}</span>
+                  </button>
+                  {tabMenuOpen && (
+                    <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-lg">
+                      {VISIBLE_TABS.map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleTabChange(value)}
+                          className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${
+                            normalizeTab(tab) === value ? "text-foreground" : "text-muted-foreground"
+                          }`}
+                        >
+                          {TAB_LABELS[value]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </header>
 
               <div className="flex-1 overflow-hidden min-h-0">
@@ -301,6 +444,8 @@ export function App() {
                       project={selected}
                       input={marketingInputs[selected.id] ?? ""}
                       onInputChange={handleMarketingInputChange}
+                      activeWorkspaces={activeWorkspaces[selected.id] ?? []}
+                      onToggleWorkspace={(path) => handleToggleWorkspace(selected.id, path)}
                     />
                   </div>
                 )}
@@ -327,11 +472,6 @@ export function App() {
                     <InsightsTab />
                   </div>
                 )}
-                {tab === "terminal" && (
-                  <div className="h-full">
-                    <TerminalTab project={selected} />
-                  </div>
-                )}
                 {tab === "chat" && (
                   <ChatTab
                     key={selected.id}
@@ -351,7 +491,7 @@ export function App() {
                 Overlord
               </h2>
               <p className="text-sm text-muted-foreground">
-                Selectionne un projet ou scanne le repertoire.
+                Select a project or scan the directory.
               </p>
             </div>
           )}

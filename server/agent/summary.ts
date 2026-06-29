@@ -18,7 +18,7 @@ export function generateSummary(session: AgentSession) {
 
   if (exchanges.length === 0) return;
 
-  const prompt = `Tu es un assistant qui genere des resumes de projet. Voici les derniers echanges sur ce projet. Genere un resume concis (3-5 lignes max) qui repond a: 1) C'est quoi ce projet ? 2) Quelles sont les dernieres choses faites ? Reponds uniquement avec le resume, pas de preamble.\n\n${exchanges.join("\n\n")}`;
+  const prompt = `You are an assistant that generates project summaries. Here are the latest exchanges for this project. Generate a concise summary (3-5 lines max) that answers: 1) What is this project? 2) What are the latest things that were done? Reply only with the summary, with no preamble.\n\n${exchanges.join("\n\n")}`;
 
   console.log(`[summary:${session.projectId}] generating summary...`);
 

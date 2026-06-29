@@ -40,102 +40,113 @@ export function SummaryTab({ project }: Props) {
   const lastSummaryAt = fullProject?.lastSummaryAt;
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4 p-6">
-      {/* Session learnings */}
-      <LearningsSection project={project} />
+    <div className="flex w-full flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {/* Project summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Summary</CardTitle>
+              {lastSummaryAt && (
+                <CardDescription className="text-xs">
+                  Updated on{" "}
+                  {new Date(lastSummaryAt).toLocaleDateString("en-US", {
+                    day: "numeric",
+                    month: "long",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </CardDescription>
+              )}
+            </CardHeader>
+            <CardContent>
+              {summary ? (
+                <p className="max-h-[260px] overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+                  {summary}
+                </p>
+              ) : (
+                <p className="text-sm italic text-muted-foreground">
+                  No summary available. The summary will be generated automatically after your next conversation with Claude.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Project summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Resume du projet</CardTitle>
-          {lastSummaryAt && (
-            <CardDescription className="text-xs">
-              Mis a jour le{" "}
-              {new Date(lastSummaryAt).toLocaleDateString("fr-FR", {
-                day: "numeric",
-                month: "long",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </CardDescription>
-          )}
-        </CardHeader>
-        <CardContent>
-          {summary ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-              {summary}
-            </p>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              Aucun resume disponible. Le resume sera genere automatiquement apres ta prochaine conversation avec Claude.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Recent Conversations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {conversations && conversations.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {conversations.slice(0, 5).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex gap-3 border-b border-border py-2 last:border-0"
+                    >
+                      <span className="min-w-[120px] shrink-0 text-xs text-muted-foreground">
+                        {new Date(c.createdAt).toLocaleDateString("en-US", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="truncate text-sm text-foreground/70">
+                        {c.title ?? "Untitled session"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm italic text-muted-foreground">
+                  No conversations.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Project info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Infos</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Chemin</span>
-              <span className="font-mono text-xs text-foreground/70">{project.path}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Conversations</span>
-              <span>{conversations?.length ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cree le</span>
-              <span className="text-foreground/70">
-                {new Date(project.createdAt).toLocaleDateString("fr-FR", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="flex w-full flex-col gap-4 xl:w-[360px] xl:shrink-0">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Path</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="break-all font-mono text-xs leading-relaxed text-foreground/70">
+                {project.path}
+              </p>
+            </CardContent>
+          </Card>
 
-      {/* Recent conversations */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Conversations recentes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {conversations && conversations.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {conversations.slice(0, 10).map((c) => (
-                <div
-                  key={c.id}
-                  className="flex gap-3 border-b border-border py-2 last:border-0"
-                >
-                  <span className="min-w-[120px] shrink-0 text-xs text-muted-foreground">
-                    {new Date(c.createdAt).toLocaleDateString("fr-FR", {
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Project Stats</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-3 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Conversations</span>
+                  <span>{conversations?.length ?? 0}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Created on</span>
+                  <span className="text-right text-foreground/70">
+                    {new Date(project.createdAt).toLocaleDateString("en-US", {
                       day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
+                      month: "long",
+                      year: "numeric",
                     })}
                   </span>
-                  <span className="truncate text-sm text-foreground/70">
-                    {c.title ?? "Session sans titre"}
-                  </span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">
-              Aucune conversation.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Session learnings */}
+      <LearningsSection project={project} />
     </div>
   );
 }
@@ -175,9 +186,9 @@ function LearningsSection({ project }: { project: Project }) {
       const res = await fetch(`/api/learnings/${project.id}/export`, { method: "POST" });
       const data = await res.json();
       if (data.ok) {
-        setExportResult(`Exporte dans .claude/skills/project-learnings/`);
+        setExportResult(`Exported to .claude/skills/project-learnings/`);
       } else {
-        setExportResult(`Erreur: ${data.error}`);
+        setExportResult(`Error: ${data.error}`);
       }
     } finally {
       setExporting(false);
@@ -196,7 +207,7 @@ function LearningsSection({ project }: { project: Project }) {
             Session learnings
             {unreviewedCount > 0 && (
               <Badge variant="outline" className="text-[10px] border-purple-400/40 text-purple-400">
-                {unreviewedCount} nouveau{unreviewedCount > 1 ? "x" : ""}
+                {unreviewedCount} new
               </Badge>
             )}
           </CardTitle>
@@ -209,12 +220,12 @@ function LearningsSection({ project }: { project: Project }) {
               disabled={exporting}
             >
               <Download className="h-3 w-3" />
-              {exporting ? "Export..." : "Exporter en skill"}
+              {exporting ? "Exporting..." : "Export as skill"}
             </Button>
           )}
         </div>
         <CardDescription className="text-xs">
-          Apprentissages auto-générés après chaque session : impasses, contexte manquant, recommandations pour ton CLAUDE.md/skills.
+          Auto-generated learnings after each session: dead ends, missing context, and recommendations for your CLAUDE.md/skills.
         </CardDescription>
         {exportResult && (
           <p className="text-[11px] text-muted-foreground mt-1">{exportResult}</p>
@@ -223,7 +234,7 @@ function LearningsSection({ project }: { project: Project }) {
       <CardContent>
         {learnings.length === 0 ? (
           <p className="text-xs italic text-muted-foreground py-4 text-center">
-            Aucun apprentissage pour l'instant. Ils seront générés automatiquement après chaque session significative.
+            No learnings yet. They will be generated automatically after each meaningful session.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
@@ -261,7 +272,7 @@ function LearningCard({
       >
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <span className="text-xs text-muted-foreground">
-          {new Date(learning.createdAt).toLocaleDateString("fr-FR", {
+          {new Date(learning.createdAt).toLocaleDateString("en-US", {
             day: "numeric",
             month: "short",
             hour: "2-digit",
@@ -276,7 +287,7 @@ function LearningCard({
         {learning.exported && (
           <Badge variant="outline" className="text-[9px] border-green-400/40 text-green-400">
             <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-            exporté
+            exported
           </Badge>
         )}
         <span className="ml-auto flex gap-1">
@@ -285,7 +296,7 @@ function LearningCard({
               role="button"
               onClick={(e) => { e.stopPropagation(); onMarkReviewed(learning.id, true); }}
               className="flex h-5 w-5 items-center justify-center rounded hover:bg-secondary cursor-pointer"
-              title="Marquer comme vu"
+              title="Mark as reviewed"
             >
               <Check className="h-3 w-3 text-muted-foreground" />
             </span>
@@ -294,7 +305,7 @@ function LearningCard({
             role="button"
             onClick={(e) => { e.stopPropagation(); onDelete(learning.id); }}
             className="flex h-5 w-5 items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive cursor-pointer"
-            title="Supprimer"
+            title="Delete"
           >
             <Trash2 className="h-3 w-3" />
           </span>

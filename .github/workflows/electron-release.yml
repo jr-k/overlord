@@ -1,0 +1,155 @@
+name: Overlord Electron Release build and push binaries
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: electron-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        env:
+          RTK_SKIP: "1"
+        run: npm ci
+
+      - name: Install Linux packaging dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build app assets
+        run: npm run build:electron
+
+      - name: Prepare Electron package
+        run: npm run prepare:electron-package
+
+      - name: Build Electron (macOS)
+        if: matrix.platform == 'mac'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        working-directory: .electron-package
+        run: node --max-old-space-size=8192 ../node_modules/electron-builder/cli.js --mac --publish never
+
+      - name: Build Electron (Windows)
+        if: matrix.platform == 'win'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        working-directory: .electron-package
+        run: node --max-old-space-size=8192 ../node_modules/electron-builder/cli.js --win --publish never
+
+      - name: Build Electron (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: .electron-package
+        run: node --max-old-space-size=8192 ../node_modules/electron-builder/cli.js --linux --publish never
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.msi
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/latest*.yml
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-artifacts
+
+      - name: Delete existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          gh release delete "v${VERSION}" --yes --cleanup-tag || true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          cat > release-notes.md <<EOF
+          Overlord desktop binaries for v${VERSION}.
+
+          macOS builds are unsigned. If macOS says \`Overlord\` is damaged after installing it from the DMG, run:
+
+          \`\`\`bash
+          xattr -dr com.apple.quarantine /Applications/Overlord.app
+          \`\`\`
+
+          Then open Overlord again from \`/Applications\`.
+          EOF
+          gh release create "v${VERSION}" \
+            --title "Release v${VERSION}" \
+            --notes-file release-notes.md
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          find ./release-artifacts -type f \( \
+            -name "*.dmg" -o \
+            -name "*.zip" -o \
+            -name "*.exe" -o \
+            -name "*.msi" -o \
+            -name "*.AppImage" -o \
+            -name "*.deb" -o \
+            -name "*.rpm" -o \
+            -name "latest*.yml" \
+          \) -print0 | xargs -0 gh release upload "v${VERSION}" --clobber

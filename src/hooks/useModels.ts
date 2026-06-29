@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { AVAILABLE_MODELS, type ModelOption } from "../lib/models.js";
 
-// Récupère la liste des modèles depuis le backend (alias résolus en versions
-// réelles via l'event system/init de la CLI). Repli sur la liste statique tant
-// que la requête n'a pas répondu, ou en cas d'échec.
+// Fetch model options from the backend. Aliases are resolved to concrete
+// versions through the Claude CLI `system/init` event. Use the static list while
+// the request is pending or when it fails.
 export function useModels(): ModelOption[] {
   const [models, setModels] = useState<ModelOption[]>(AVAILABLE_MODELS);
 

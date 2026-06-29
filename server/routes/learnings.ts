@@ -7,7 +7,7 @@ import { join } from "path";
 
 const app = new Hono();
 
-// GET /api/learnings/:projectId — list all learnings for a project
+// GET /api/learnings/:projectId: list all learnings for a project
 app.get("/:projectId", (c) => {
   const projectId = Number(c.req.param("projectId"));
   const result = db
@@ -31,7 +31,7 @@ app.get("/:projectId/unreviewed-count", (c) => {
   return c.json({ count });
 });
 
-// PATCH /api/learnings/:id — mark as reviewed / edit
+// PATCH /api/learnings/:id: mark as reviewed / edit
 app.patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const body = await c.req.json();
@@ -47,7 +47,7 @@ app.delete("/:id", (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/learnings/:projectId/export — merge all learnings into .claude/skills/project-learnings.md
+// POST /api/learnings/:projectId/export: merge all learnings into .claude/skills/project-learnings.md
 app.post("/:projectId/export", (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();

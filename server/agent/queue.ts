@@ -4,7 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { broadcast } from "./sessions.js";
 import type { AgentSession, Channel } from "./types.js";
 
-// Persistent message queue — messages typed while the agent is busy.
+// Persistent message queue for messages typed while the agent is busy.
 // Stored in SQLite so they survive page reloads, app kills and reconnects.
 
 export interface QueuedMessage {
