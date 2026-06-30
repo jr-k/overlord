@@ -166,4 +166,16 @@ export function initDb() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS tool_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      tool TEXT NOT NULL,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+  `);
 }

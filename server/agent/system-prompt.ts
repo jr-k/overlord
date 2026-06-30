@@ -20,6 +20,14 @@ This project has a CodeGraph index (.codegraph/) — a parsed knowledge graph of
 Heuristic: if the task involves "where is X used", "find all Y", "what depends on Z", or "context for editing W" — start with CodeGraph. Fall back to Read/Grep only when CodeGraph returns nothing useful.
 [/CODEGRAPH AVAILABLE]`;
 
+export const HEADLESS_NUDGE = `
+
+[OVERLORD RUNTIME]
+You are running headlessly inside Overlord (claude --print), NOT in an interactive terminal. There is NO permission dialog, and the user cannot "click Allow" anywhere. Never tell the user a permission prompt will appear or ask them to approve a tool in their terminal — that does not exist here.
+
+Your tools are gated by a fixed allowlist. If a tool call fails or is denied because it is not allowed (e.g. an MCP tool that is present but not permitted), do NOT invent a terminal approval dialog. Instead, call the tool mcp__overlord__overlord_request_tool with the exact tool name (for an MCP server, request the whole server, e.g. mcp__claude_ai_Gmail, which covers all its tools) and a short reason. This shows the user an Approve/Deny banner directly in the chat; approving adds the tool to the allowlist automatically. After requesting, tell the user a request is waiting for their approval in the chat, and stop attempting that tool until they approve. Only mention the Settings tab as a manual fallback if the request tool itself is unavailable.
+[/OVERLORD RUNTIME]`;
+
 export interface EffectivePromptParts {
   base: string;
   nudges: { name: string; content: string; reason: string }[];
@@ -36,6 +44,12 @@ export function buildEffectiveSystemPrompt(
     : (project?.systemPrompt || DEFAULT_CHAT_PROMPT);
 
   const nudges: EffectivePromptParts["nudges"] = [];
+
+  nudges.push({
+    name: "Headless runtime",
+    content: HEADLESS_NUDGE,
+    reason: "Overlord runs the agent headless — no interactive permission prompts",
+  });
 
   if (channel === "chat" && isCodegraphIndexed(projectPath)) {
     nudges.push({

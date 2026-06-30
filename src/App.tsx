@@ -21,7 +21,9 @@ import { ExternalLink } from "lucide-react";
 export type AgentStatusMap = Record<number, "none" | "idle" | "running" | "done" | "error">;
 
 export function App() {
-  const { data: projects, refetch } = useApi<Project[]>("/projects");
+  // Load hidden projects too — the sidebar filters them client-side, and its
+  // "Afficher les cachés" toggle needs them present to reveal anything.
+  const { data: projects, refetch } = useApi<Project[]>("/projects?hidden=true");
   const [selected, setSelected] = useState<Project | null>(null);
   const [tab, setTab] = useState(() => localStorage.getItem("overlord:tab") ?? "chat");
   const [chatInputs, setChatInputs] = useState<Record<number, string>>(() => {
@@ -55,6 +57,15 @@ export function App() {
     }
     setRestored(true);
   }, [projects, restored]);
+
+  // Keep `selected` in sync with the refetched list, so edits made elsewhere
+  // (e.g. saving allowedTools in Settings) are reflected in the prop instead of
+  // reverting to a stale snapshot on remount.
+  useEffect(() => {
+    if (!selected || !projects) return;
+    const fresh = projects.find((p) => p.id === selected.id);
+    if (fresh && fresh !== selected) setSelected(fresh);
+  }, [projects, selected]);
 
   // Persist selected project + fetch remote URL
   useEffect(() => {
@@ -291,7 +302,7 @@ export function App() {
                 )}
                 {tab === "settings" && (
                   <div className="h-full overflow-auto">
-                    <SettingsTab key={selected.id} project={selected} />
+                    <SettingsTab key={selected.id} project={selected} onProjectUpdate={refetch} />
                   </div>
                 )}
                 {tab === "marketing" && (

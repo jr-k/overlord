@@ -9,6 +9,7 @@ import { broadcast, saveEvents, saveEventsNow } from "./sessions.js";
 import { dequeueNext, broadcastQueueState } from "./queue.js";
 import { broadcastAll } from "../ws.js";
 import { buildEffectiveSystemPrompt } from "./system-prompt.js";
+import { DEFAULT_ALLOWED_TOOLS } from "./default-tools.js";
 import { generateSummary } from "./summary.js";
 import { generateLearnings } from "./learnings.js";
 import { isIndexed as isCodegraphIndexed, runCodegraph, CODEGRAPH_BIN } from "../routes/codegraph.js";
@@ -62,17 +63,15 @@ export function sendMessage(session: AgentSession, message: string) {
 
   const model = project?.model;
 
-  const defaultTools = [
-    "Edit", "Write", "Read", "Bash", "Glob", "Grep", "NotebookEdit",
-    "WebFetch", "WebSearch", "ToolSearch", "Agent",
-    "mcp__overlord__overlord_list_todos", "mcp__overlord__overlord_add_todo",
-    "mcp__overlord__overlord_complete_todo", "mcp__overlord__overlord_delete_todo",
-    "mcp__overlord__overlord_list_projects", "mcp__overlord__overlord_get_project",
-    "mcp__overlord__overlord_ask_project",
-  ];
-  let allowedTools = defaultTools;
+  let allowedTools = DEFAULT_ALLOWED_TOOLS;
   if (project?.allowedTools) {
     try { allowedTools = JSON.parse(project.allowedTools); } catch {}
+  }
+
+  // The tool-request escalation path must never be disable-able — otherwise an
+  // agent on a custom allowlist can't even ask for a denied tool. Always allow it.
+  if (!allowedTools.includes("mcp__overlord__overlord_request_tool")) {
+    allowedTools = [...allowedTools, "mcp__overlord__overlord_request_tool"];
   }
 
   if (codegraphActive) {

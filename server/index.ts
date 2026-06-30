@@ -20,6 +20,8 @@ import learningsRoutes from "./routes/learnings.js";
 import codegraphRoutes from "./routes/codegraph.js";
 import uploadsRoutes from "./routes/uploads.js";
 import insightsRoutes from "./routes/insights.js";
+import commandsRoutes from "./routes/commands.js";
+import toolRequestsRoutes from "./routes/tool-requests.js";
 
 import { setWebSocketServer } from "./ws.js";
 import { attachWsHandlers } from "./agent/ws-handler.js";
@@ -50,6 +52,8 @@ app.route("/api/learnings", learningsRoutes);
 app.route("/api/codegraph", codegraphRoutes);
 app.route("/api/uploads", uploadsRoutes);
 app.route("/api/insights", insightsRoutes);
+app.route("/api/commands", commandsRoutes);
+app.route("/api/tool-requests", toolRequestsRoutes);
 
 app.post("/api/terminal/open", async (c) => {
   const body = await c.req.json();
