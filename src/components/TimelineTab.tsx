@@ -11,14 +11,14 @@ export function TimelineTab({ project }: Props) {
   );
 
   if (loading) {
-    return <div className="p-6 text-muted-foreground">Chargement...</div>;
+    return <div className="p-6 text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="max-w-2xl p-6">
       {!sessions || sessions.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
-          Aucune session enregistree pour ce projet.
+          No sessions recorded for this project.
         </p>
       ) : (
         <div className="flex flex-col">
@@ -33,7 +33,7 @@ export function TimelineTab({ project }: Props) {
               {/* Content */}
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="mb-1 text-xs text-muted-foreground">
-                  {new Date(s.startedAt).toLocaleDateString("fr-FR", {
+                  {new Date(s.startedAt).toLocaleDateString("en-US", {
                     weekday: "long",
                     day: "numeric",
                     month: "long",
@@ -42,12 +42,12 @@ export function TimelineTab({ project }: Props) {
                   })}
                   {s.endedAt && (
                     <span className="text-muted-foreground/60">
-                      {" "}— {getDuration(s.startedAt, s.endedAt)}
+                      {" "}- {getDuration(s.startedAt, s.endedAt)}
                     </span>
                   )}
                 </div>
                 <div className="text-sm leading-relaxed text-foreground/80">
-                  {s.summary ?? "Pas de resume"}
+                  {s.summary ?? "No summary"}
                 </div>
               </div>
             </div>

@@ -31,9 +31,9 @@ export function generateLearnings(session: AgentSession) {
   const prompt = `You are analyzing a completed Claude Code session to extract compounding learnings for the project repo.
 
 Find:
-1. **Dead ends** — where the agent took a wrong direction before course-correcting. Concrete examples.
-2. **Missing context** — what was NOT in the repo/CLAUDE.md/skills that would have helped the agent reach the goal faster (patterns, conventions, undocumented constraints, implicit decisions).
-3. **Recommendations** — specific, actionable additions for the repo: skills to create, CLAUDE.md entries to add, patterns to document, conventions to make explicit.
+1. **Dead ends**: where the agent took a wrong direction before course-correcting. Concrete examples.
+2. **Missing context**: what was NOT in the repo/CLAUDE.md/skills that would have helped the agent reach the goal faster (patterns, conventions, undocumented constraints, implicit decisions).
+3. **Recommendations**: specific, actionable additions for the repo: skills to create, CLAUDE.md entries to add, patterns to document, conventions to make explicit.
 
 Output strict markdown with exactly these 3 sections:
 

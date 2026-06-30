@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { existsSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, rmSync } from "fs";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 
@@ -11,8 +11,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = new Hono();
 
+function resolveBin(name: string) {
+  const binName = process.platform === "win32" ? `${name}.cmd` : name;
+  const candidates = [
+    resolve(process.cwd(), "node_modules", ".bin", binName),
+    join(__dirname, "..", "..", "node_modules", ".bin", binName),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
 // Path to bundled codegraph binary
-const CODEGRAPH_BIN = join(__dirname, "..", "..", "node_modules", ".bin", "codegraph");
+const CODEGRAPH_BIN = resolveBin("codegraph");
 
 // In-memory tracking of which projects are currently being indexed
 const indexingProjects = new Set<number>();
@@ -33,7 +43,7 @@ app.get("/:projectId/status", (c) => {
   });
 });
 
-// POST /api/codegraph/:projectId/init — runs `codegraph init` then `codegraph index`
+// POST /api/codegraph/:projectId/init: runs `codegraph init` then `codegraph index`
 app.post("/:projectId/init", async (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
@@ -63,7 +73,7 @@ app.post("/:projectId/init", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/codegraph/:projectId/sync — incremental update
+// POST /api/codegraph/:projectId/sync: incremental update
 app.post("/:projectId/sync", async (c) => {
   const projectId = Number(c.req.param("projectId"));
   const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
@@ -78,14 +88,24 @@ app.post("/:projectId/sync", async (c) => {
   return c.json({ ok: true });
 });
 
-// DELETE /api/codegraph/:projectId — remove .codegraph
+// DELETE /api/codegraph/:projectId: remove .codegraph
 app.delete("/:projectId", async (c) => {
   const projectId = Number(c.req.param("projectId"));
-  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
-  if (!project) return c.json({ error: "Not found" }, 404);
+  if (!Number.isFinite(projectId)) {
+    return c.json({ error: "Invalid project id" }, 400);
+  }
 
-  await runCodegraph(["uninit", "--yes", project.path], project.path);
-  return c.json({ ok: true });
+  try {
+    const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+    if (!project) return c.json({ error: "Not found" }, 404);
+
+    indexingProjects.delete(projectId);
+    rmSync(join(project.path, ".codegraph"), { recursive: true, force: true });
+    return c.json({ ok: true, indexed: false, indexing: false });
+  } catch (err) {
+    console.log(`[codegraph:${projectId}] disable failed:`, err);
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });
 
 function runCodegraph(args: string[], cwd: string, timeoutMs = 10 * 60 * 1000): Promise<{ code: number; stdout: string; stderr: string }> {

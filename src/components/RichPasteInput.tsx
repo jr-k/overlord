@@ -154,7 +154,7 @@ export const RichPasteInput = forwardRef<RichPasteInputHandle, Props>(function R
         span.dataset.blockId = token.block.id;
         span.className = "inline-flex items-center gap-1 rounded-md bg-primary/15 border border-primary/30 px-2 py-0.5 mx-0.5 text-[11px] text-primary font-mono select-none align-middle cursor-default";
         span.title = token.block.content.slice(0, 500) + (token.block.content.length > 500 ? "..." : "");
-        span.textContent = `📎 ${token.block.lineCount} ligne${token.block.lineCount > 1 ? "s" : ""}`;
+        span.textContent = `📎 ${token.block.lineCount} line${token.block.lineCount > 1 ? "s" : ""}`;
         el.appendChild(span);
       } else {
         const span = document.createElement("span");
@@ -223,7 +223,7 @@ export const RichPasteInput = forwardRef<RichPasteInputHandle, Props>(function R
     span.dataset.blockId = id;
     span.className = "inline-flex items-center gap-1 rounded-md bg-primary/15 border border-primary/30 px-2 py-0.5 mx-0.5 text-[11px] text-primary font-mono select-none align-middle cursor-default";
     span.title = pasted.slice(0, 500) + (pasted.length > 500 ? "..." : "");
-    span.textContent = `📎 ${lineCount} lignes`;
+    span.textContent = `📎 ${lineCount} lines`;
 
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
@@ -433,7 +433,7 @@ export const RichPasteInput = forwardRef<RichPasteInputHandle, Props>(function R
             type="button"
             onClick={handleAttachClick}
             disabled={disabled || uploading}
-            title={uploading ? "Upload en cours..." : "Joindre un fichier"}
+            title={uploading ? "Uploading..." : "Attach a file"}
             className="absolute right-2 top-2 z-10 rounded-md p-1.5 text-muted-foreground hover:bg-secondary-foreground/10 hover:text-foreground disabled:opacity-50"
           >
             {uploading ? (

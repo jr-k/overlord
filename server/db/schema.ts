@@ -151,7 +151,7 @@ export const toolRequests = sqliteTable("tool_requests", {
   resolvedAt: text("resolved_at"),
 });
 
-// Messages typed while the agent is busy — persisted so they survive
+// Messages typed while the agent is busy. Persisted so they survive
 // reloads, app kills, and WebSocket reconnects. Drained server-side.
 export const queuedMessages = sqliteTable("queued_messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),

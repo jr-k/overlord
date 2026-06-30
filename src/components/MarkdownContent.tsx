@@ -24,7 +24,7 @@ function CodeBlock({ children, className: langClass, ...props }: any) {
       <button
         onClick={handleCopy}
         className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-secondary/80 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-secondary"
-        title="Copier le code"
+        title="Copy code"
       >
         {copied ? (
           <Check className="h-3 w-3 text-green-400" />

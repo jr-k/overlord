@@ -3,7 +3,7 @@ import { db } from "../db/index.js";
 import { projects, sessions, conversations, messages, todos, marketingDrafts, marketingAssets } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { readdirSync, existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { isAbsolute, join, relative } from "path";
 import { execSync } from "child_process";
 import { detectWorkspaces } from "../workspaces.js";
 import { buildEffectiveSystemPrompt } from "../agent/system-prompt.js";
@@ -33,14 +33,21 @@ function getGitRemoteUrl(projectPath: string): string | null {
 
 const app = new Hono();
 
+function isInWorkspace(projectPath: string, workspaceRoot: string) {
+  const rel = relative(workspaceRoot, projectPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 // GET /api/projects - list all projects (non-hidden, favorites first)
 app.get("/", (c) => {
   const showHidden = c.req.query("hidden") === "true";
+  const rootDir = (c.get("rootDir" as never) as string) || process.cwd();
   const allProjects = db
     .select()
     .from(projects)
     .orderBy(desc(projects.favorite), desc(projects.updatedAt))
     .all()
+    .filter((p) => isInWorkspace(p.path, rootDir))
     .filter((p) => showHidden || !p.hidden);
   return c.json(allProjects);
 });
@@ -73,7 +80,7 @@ app.get("/:id/workspaces", (c) => {
   return c.json(info);
 });
 
-// GET /api/projects/:id/system-prompt?channel=chat — preview the effective system prompt
+// GET /api/projects/:id/system-prompt?channel=chat: preview the effective system prompt
 app.get("/:id/system-prompt", (c) => {
   const id = Number(c.req.param("id"));
   const channel = (c.req.query("channel") as Channel) || "chat";
@@ -101,14 +108,14 @@ app.patch("/:id", async (c) => {
       // Check if another project already uses this path in DB
       const otherProject = db.select().from(projects).where(eq(projects.path, newPath)).get();
       if (otherProject && otherProject.id !== id) {
-        return c.json({ error: "Un autre projet utilise déjà ce chemin" }, 409);
+        return c.json({ error: "Another project already uses this path" }, 409);
       }
 
       const newPathExists = existsSync(newPath);
       const oldPathExists = existsSync(oldPath);
 
       if (newPathExists) {
-        return c.json({ error: `Un dossier existe déjà à cet emplacement: ${newPath}` }, 409);
+        return c.json({ error: `A folder already exists at this location: ${newPath}` }, 409);
       }
 
       try {
@@ -121,7 +128,7 @@ app.patch("/:id", async (c) => {
           mkdirSync(newPath, { recursive: true });
         }
       } catch (err) {
-        return c.json({ error: `Échec du déplacement: ${err}` }, 500);
+        return c.json({ error: `Move failed: ${err}` }, 500);
       }
 
       body.path = newPath;
@@ -131,7 +138,7 @@ app.patch("/:id", async (c) => {
 
       // Clear the claudeSessionId of any in-memory agent session for this project
       // (Claude sessions are tied to cwd, so rename invalidates them)
-      // This is done via the DB indirectly — but also clear conversations' sessionId
+      // This is done via the DB indirectly, but also clear conversations' sessionId.
       db.update(conversations)
         .set({ claudeSessionId: null })
         .where(eq(conversations.projectId, id))
@@ -295,7 +302,7 @@ app.delete("/:id", async (c) => {
 
     return c.json({ ok: true, deletedFolder: deleteFolder });
   } catch (err) {
-    return c.json({ error: `Échec de la suppression: ${err}` }, 500);
+    return c.json({ error: `Deletion failed: ${err}` }, 500);
   }
 });
 

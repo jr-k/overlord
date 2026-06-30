@@ -4,7 +4,9 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 import { WebSocketServer } from "ws";
 import { spawn, execSync } from "child_process";
+import { existsSync } from "fs";
 import { resolve } from "path";
+import { pathToFileURL } from "url";
 
 import { initDb, db } from "./db/index.js";
 import { conversations, projects } from "./db/schema.js";
@@ -19,6 +21,8 @@ import skillsRoutes from "./routes/skills.js";
 import learningsRoutes from "./routes/learnings.js";
 import codegraphRoutes from "./routes/codegraph.js";
 import uploadsRoutes from "./routes/uploads.js";
+import settingsRoutes from "./routes/settings.js";
+import { getWorkspaceRoot } from "./settings.js";
 import insightsRoutes from "./routes/insights.js";
 import commandsRoutes from "./routes/commands.js";
 import toolRequestsRoutes from "./routes/tool-requests.js";
@@ -30,16 +34,42 @@ import { getCommitsSince, rollbackToSnapshot } from "./agent/git-snapshot.js";
 import type { Channel } from "./agent/types.js";
 
 const PORT = Number(process.env.PORT) || 4747;
-const ROOT_DIR = process.env.OVERLORD_ROOT || resolve(process.cwd(), "..");
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const STATIC_ROOT = process.env.OVERLORD_STATIC_ROOT || resolve(process.cwd(), "dist/client");
+const RTK_SETUP_SCRIPT = resolve(process.cwd(), "scripts/setup-rtk.sh");
 
 initDb();
 
+function runRuntimeSetupHooks() {
+  if (process.env.RTK_SKIP === "1") return;
+  if (existsSync(RTK_SETUP_SCRIPT)) {
+    const proc = spawn("bash", [RTK_SETUP_SCRIPT], {
+      detached: true,
+      env: { ...process.env },
+      stdio: "ignore",
+    });
+    proc.unref();
+  }
+}
+
+runRuntimeSetupHooks();
+
 const app = new Hono();
+app.onError((err, c) => {
+  console.error("[api] unhandled error:", err);
+  if (c.req.path.startsWith("/api/")) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+  return c.text("Internal Server Error", 500);
+});
 app.use("/api/*", cors());
 app.use("/api/*", async (c, next) => {
-  c.set("rootDir" as never, ROOT_DIR as never);
+  c.set("rootDir" as never, getWorkspaceRoot() as never);
   await next();
+});
+
+app.get("/api/health", (c) => {
+  return c.json({ ok: true, name: "overlord" });
 });
 
 app.route("/api/projects", projectRoutes);
@@ -51,52 +81,107 @@ app.route("/api/skills", skillsRoutes);
 app.route("/api/learnings", learningsRoutes);
 app.route("/api/codegraph", codegraphRoutes);
 app.route("/api/uploads", uploadsRoutes);
+app.route("/api/settings", settingsRoutes);
 app.route("/api/insights", insightsRoutes);
 app.route("/api/commands", commandsRoutes);
 app.route("/api/tool-requests", toolRequestsRoutes);
 
+type TerminalConfig =
+  | { id: string; name: string; platform: "darwin"; app: string }
+  | { id: string; name: string; platform: "linux"; cmd: string; args: (dir: string) => string[] }
+  | { id: string; name: string; platform: "win32"; cmd: string };
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+const TERMINALS: TerminalConfig[] = [
+  { id: "terminal", name: "Terminal", platform: "darwin", app: "Terminal" },
+  { id: "iterm2", name: "iTerm2", platform: "darwin", app: "iTerm" },
+  { id: "warp", name: "Warp", platform: "darwin", app: "Warp" },
+  { id: "gnome-terminal", name: "GNOME Terminal", platform: "linux", cmd: "gnome-terminal", args: (dir: string) => ["--working-directory", dir] },
+  { id: "konsole", name: "Konsole", platform: "linux", cmd: "konsole", args: (dir: string) => ["--workdir", dir] },
+  { id: "xfce4-terminal", name: "Xfce Terminal", platform: "linux", cmd: "xfce4-terminal", args: (dir: string) => ["--working-directory", dir] },
+  { id: "xterm", name: "xterm", platform: "linux", cmd: "xterm", args: (dir: string) => ["-e", "sh", "-c", `cd ${shellQuote(dir)} && exec "\${SHELL:-sh}"`] },
+  { id: "cmd", name: "Command Prompt", platform: "win32", cmd: "cmd" },
+];
+
+function hasDarwinApp(appName: string) {
+  try {
+    execSync(`osascript -e 'id of app "${appName}"'`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getAvailableTerminals() {
+  const platform = process.platform;
+  return TERMINALS.filter((terminal) => {
+    if (terminal.platform !== platform) return false;
+    if ("app" in terminal) return hasDarwinApp(terminal.app);
+    if (!("cmd" in terminal) || terminal.cmd === "cmd") return true;
+    try {
+      execSync(`which ${terminal.cmd}`, { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+app.get("/api/terminals", (c) => {
+  return c.json(getAvailableTerminals().map(({ id, name }) => ({ id, name })));
+});
+
 app.post("/api/terminal/open", async (c) => {
   const body = await c.req.json();
   const dir = body.path;
-  if (!dir) return c.json({ error: "Path required" }, 400);
+  if (!dir || typeof dir !== "string") return c.json({ error: "Path required" }, 400);
 
-  const platform = process.platform;
-  if (platform === "darwin") {
-    spawn("open", ["-a", "Terminal", dir], { detached: true, stdio: "ignore" });
-  } else if (platform === "linux") {
-    for (const term of ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"]) {
-      try {
-        spawn(term, ["--working-directory", dir], { detached: true, stdio: "ignore" });
-        break;
-      } catch { continue; }
-    }
-  } else if (platform === "win32") {
-    spawn("cmd", ["/c", "start", "cmd", "/K", `cd /d ${dir}`], { detached: true, stdio: "ignore" });
+  const available = getAvailableTerminals();
+  const terminalConfig = available.find((terminal) => terminal.id === body.terminal) ?? available[0];
+  if (!terminalConfig) return c.json({ error: "No terminal found" }, 404);
+
+  if (terminalConfig.platform === "darwin") {
+    spawn("open", ["-a", terminalConfig.app, dir], { detached: true, stdio: "ignore" });
+  } else if (terminalConfig.platform === "win32") {
+    spawn("cmd", ["/c", "start", "", "/D", dir, "cmd"], { detached: true, stdio: "ignore" });
+  } else {
+    spawn(terminalConfig.cmd, terminalConfig.args(dir), { detached: true, stdio: "ignore" });
   }
 
   return c.json({ ok: true });
 });
 
 const EDITORS = [
-  { id: "cursor", name: "Cursor", cmd: "cursor", test: "cursor" },
-  { id: "vscode", name: "VS Code", cmd: "code", test: "code" },
-  { id: "zed", name: "Zed", cmd: "zed", test: "zed" },
-  { id: "webstorm", name: "WebStorm", cmd: "webstorm", test: "webstorm" },
-  { id: "idea", name: "IntelliJ IDEA", cmd: "idea", test: "idea" },
-  { id: "sublime", name: "Sublime Text", cmd: "subl", test: "subl" },
+  { id: "cursor", name: "Cursor", cmd: "cursor", test: "cursor", darwinApp: "Cursor" },
+  { id: "vscode", name: "VS Code", cmd: "code", test: "code", darwinApp: "Visual Studio Code" },
+  { id: "zed", name: "Zed", cmd: "zed", test: "zed", darwinApp: "Zed" },
+  { id: "webstorm", name: "WebStorm", cmd: "webstorm", test: "webstorm", darwinApp: "WebStorm" },
+  { id: "idea", name: "IntelliJ IDEA", cmd: "idea", test: "idea", darwinApp: "IntelliJ IDEA" },
+  { id: "sublime", name: "Sublime Text", cmd: "subl", test: "subl", darwinApp: "Sublime Text" },
   { id: "vim", name: "Vim", cmd: "vim", test: "vim" },
   { id: "nano", name: "Nano", cmd: "nano", test: "nano" },
 ];
 
+function hasCommand(command: string) {
+  try {
+    execSync(`command -v ${command}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isEditorAvailable(editor: (typeof EDITORS)[number]) {
+  if (hasCommand(editor.test)) return true;
+  const darwinApp = "darwinApp" in editor ? editor.darwinApp : undefined;
+  return process.platform === "darwin" && !!darwinApp && hasDarwinApp(darwinApp);
+}
+
 app.get("/api/editors", (c) => {
-  const available = EDITORS.filter((e) => {
-    try {
-      execSync(`which ${e.test}`, { stdio: "ignore" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  const available = EDITORS.filter(isEditorAvailable);
   return c.json(available);
 });
 
@@ -108,7 +193,13 @@ app.post("/api/editor/open", async (c) => {
   const editorConfig = EDITORS.find((e) => e.id === editor);
   if (!editorConfig) return c.json({ error: "Unknown editor" }, 404);
 
-  spawn(editorConfig.cmd, [filePath], { detached: true, stdio: "ignore" });
+  if (hasCommand(editorConfig.cmd)) {
+    spawn(editorConfig.cmd, [filePath], { detached: true, stdio: "ignore" });
+  } else if (process.platform === "darwin" && "darwinApp" in editorConfig && editorConfig.darwinApp && hasDarwinApp(editorConfig.darwinApp)) {
+    spawn("open", ["-a", editorConfig.darwinApp, filePath], { detached: true, stdio: "ignore" });
+  } else {
+    return c.json({ error: `${editorConfig.name} is not available` }, 404);
+  }
   return c.json({ ok: true });
 });
 
@@ -129,13 +220,12 @@ app.get("/api/rtk/gain/:projectId", (c) => {
   }
 });
 
-// --- Résolution dynamique des versions de modèles (alias -> ID versionné) ---
-// On lance la CLI avec un alias et on lit le 1er event `system/init` (émis au
-// démarrage, AVANT toute inférence), puis on tue le process. C'est quasi gratuit
-// et ne requiert aucune clé API : on s'appuie sur l'auth de la CLI Claude.
+// Dynamically resolve model aliases to versioned IDs.
+// We start the CLI with an alias, read the first `system/init` event, then stop
+// the process. It is cheap and uses the existing Claude CLI authentication.
 interface ResolvedModelOption { id: string; label: string; short: string; version: string | null; }
 
-// opus/sonnet supportent le contexte 1M, pas haiku.
+// Opus and Sonnet support 1M context. Haiku does not.
 const MODEL_ALIASES = [
   { alias: "opus", oneM: true },
   { alias: "sonnet", oneM: true },
@@ -212,8 +302,8 @@ app.get("/api/models", async (c) => {
     }
   }
 
-  // On ne met en cache qu'un résultat où au moins un alias a été résolu, pour
-  // éviter de figer un échec transitoire (CLI absente, offline...).
+  // Cache only when at least one alias resolved, so transient CLI or network
+  // failures do not freeze the static fallback list.
   if (resolved.some((r) => r.id)) modelCache = { at: Date.now(), models };
   return c.json(models);
 });
@@ -348,16 +438,28 @@ app.get("/api/agent/statuses", (c) => {
   return c.json(statuses);
 });
 
-app.use("/*", serveStatic({ root: "./dist/client" }));
-app.get("/*", serveStatic({ root: "./dist/client", path: "index.html" }));
+app.use("/*", serveStatic({ root: STATIC_ROOT }));
+app.get("/*", serveStatic({ root: STATIC_ROOT, path: "index.html" }));
 
-const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`🏰 Overlord running at http://localhost:${info.port}`);
-  console.log(`📁 Root directory: ${ROOT_DIR}`);
-});
+export function startOverlordServer(port = PORT) {
+  const server = serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`🏰 Overlord running at http://localhost:${info.port}`);
+    console.log(`📁 Workspace directory: ${getWorkspaceRoot()}`);
+  });
 
-const wss = new WebSocketServer({ server: server as never, path: "/ws" });
-setWebSocketServer(wss);
-attachWsHandlers(wss);
+  const wss = new WebSocketServer({ server: server as never, path: "/ws" });
+  setWebSocketServer(wss);
+  attachWsHandlers(wss);
 
-export { app, PORT, ROOT_DIR };
+  return { server, wss, port };
+}
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  : false;
+
+if (isDirectRun) {
+  startOverlordServer();
+}
+
+export { app, PORT, STATIC_ROOT };

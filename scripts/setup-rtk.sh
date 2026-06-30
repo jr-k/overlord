@@ -36,6 +36,14 @@ if rtk init --show 2>&1 | grep -q "\[ok\] Hook"; then
   echo "[rtk] already configured for Claude Code"
 else
   echo "[rtk] configuring rtk for Claude Code..."
-  rtk init -g --auto-patch
-  echo "[rtk] done. Restart Claude Code to activate."
+  mkdir -p "$HOME/.claude"
+  if rtk init -g --auto-patch; then
+    echo "[rtk] done. Restart Claude Code to activate."
+  else
+    echo "[rtk] WARNING: rtk configuration failed. Overlord will work without RTK hooks."
+    if [ "$CI" = "true" ]; then
+      exit 0
+    fi
+    exit 1
+  fi
 fi

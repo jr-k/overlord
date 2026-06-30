@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Square, Copy, Check, ArrowDown, Undo2, Plus, Pencil, X } from "lucide-react";
+import { Square, Copy, Check, ArrowDown, Undo2, Plus, SendHorizontal, Pencil, X } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./MarkdownContent.js";
 import { ToolUseCard } from "./ToolUseCard.js";
@@ -49,6 +49,31 @@ function mergeSlashNames(prev: SlashCmd[], names: string[]): SlashCmd[] {
     .filter((n) => !have.has(n))
     .map((n): SlashCmd => ({ name: n, type: n.includes(":") ? "plugin" : "builtin" }));
   return added.length ? [...prev, ...added].sort((a, b) => a.name.localeCompare(b.name)) : prev;
+}
+
+interface OverlordDesktopBridge {
+  isDesktop: boolean;
+  notifyAgentDone: (payload: { projectName: string; body?: string }) => Promise<unknown>;
+}
+
+function getDesktopBridge() {
+  return (window as Window & { overlordDesktop?: OverlordDesktopBridge }).overlordDesktop;
+}
+
+function notifyAgentDone(projectName: string) {
+  const body = "Claude has finished its work.";
+  const desktop = getDesktopBridge();
+  if (desktop?.isDesktop) {
+    void desktop.notifyAgentDone({ projectName, body });
+    return;
+  }
+
+  if (document.hidden && Notification.permission === "granted") {
+    new Notification(`Overlord - ${projectName}`, {
+      body,
+      icon: "/favicons/favicon-128.png",
+    });
+  }
 }
 
 interface PastedBlock {
@@ -205,7 +230,7 @@ function PastedBadge({ block }: { block: PastedBlock }) {
       onMouseEnter={() => setShowPreview(true)}
       onMouseLeave={() => setShowPreview(false)}
     >
-      [{block.lineCount} ligne{block.lineCount > 1 ? "s" : ""} copiee{block.lineCount > 1 ? "s" : ""}]
+      [{block.lineCount} copied line{block.lineCount > 1 ? "s" : ""}]
       {showPreview && (
         <div className="absolute bottom-full left-0 mb-1 w-80 max-h-48 overflow-auto rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg z-50 font-mono whitespace-pre-wrap">
           {block.content.slice(0, 2000)}
@@ -247,7 +272,7 @@ function AddToTodoButton({ content, projectId }: { content: string; projectId: n
         </span>
       </TooltipTrigger>
       <TooltipContent side="left" className="text-xs">
-        Ajouter aux todos
+        Add to todos
       </TooltipContent>
     </Tooltip>
   );
@@ -304,13 +329,13 @@ const UserMessage = React.memo(function UserMessage({
               onClick={() => handleRollback(true)}
               className="rounded bg-destructive px-2 py-1 text-[11px] text-white hover:bg-destructive/80"
             >
-              Rollback quand meme
+              Roll back anyway
             </button>
             <button
               onClick={() => setConfirmNeeded(null)}
               className="rounded bg-secondary px-2 py-1 text-[11px] hover:bg-secondary/80"
             >
-              Annuler
+              Cancel
             </button>
           </div>
         </div>
@@ -323,13 +348,13 @@ const UserMessage = React.memo(function UserMessage({
             onClick={() => handleRollback()}
             disabled={rolling}
             className="absolute -left-8 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-md opacity-0 group-hover/user:opacity-100 transition-opacity hover:bg-secondary"
-            title="Rollback: restaurer le code et remettre le message dans l'input"
+            title="Rollback: restore the code and put the message back into the input"
           >
             <Undo2 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
         )}
         <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider opacity-50">
-          Toi
+          You
         </div>
         <div className="text-sm leading-relaxed select-text">
           {entry.displayContent ? (
@@ -383,7 +408,7 @@ const MessageBubble = React.memo(function MessageBubble({ content, projectId }: 
                 )}
               </span>
             </TooltipTrigger>
-            <TooltipContent side="left" className="text-xs">Copier le markdown</TooltipContent>
+            <TooltipContent side="left" className="text-xs">Copy markdown</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -394,7 +419,7 @@ const MessageBubble = React.memo(function MessageBubble({ content, projectId }: 
   );
 });
 
-// Persistent message queue — list, edit and delete pending messages.
+// Persistent message queue: list, edit and delete pending messages.
 function QueuePanel({
   queue,
   agentIdle,
@@ -435,15 +460,15 @@ function QueuePanel({
           {queue.length}
         </span>
         <span className="text-xs text-muted-foreground">
-          message{queue.length > 1 ? "s" : ""} en attente
+          pending message{queue.length > 1 ? "s" : ""}
         </span>
         {agentIdle && (
           <button
             onClick={onRun}
             className="text-[10px] font-medium text-primary hover:underline"
-            title="Envoyer maintenant le prochain message de la file"
+            title="Send the next queued message now"
           >
-            Reprendre
+            Resume
           </button>
         )}
         <button
@@ -538,9 +563,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
   // Model settings (fetched from project)
   const [model, setModel] = useState<string>("");
-  // Modèle réellement résolu par la CLI (alias -> version complète), lu dans l'event system/init.
+  // Concrete model resolved by the CLI (alias to full version), read from the `system/init` event.
   const [resolvedModel, setResolvedModel] = useState<string>("");
-  // Liste des modèles (versions résolues dynamiquement côté serveur).
+  // Model list with versions resolved dynamically by the server.
   const models = useModels();
   useEffect(() => {
     fetch(`/api/projects/${project.id}`)
@@ -618,7 +643,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     avg_savings_pct: number;
   } | null>(null);
 
-  // Codegraph usage estimate — heuristic tokens saved per tool call (arbitrary, tweakable).
+  // Codegraph usage estimate: heuristic tokens saved per tool call (arbitrary, tweakable).
   // Each value = rough tokens a Read+Grep equivalent would have consumed.
   const codegraphSavingsPerCall: Record<string, number> = {
     mcp__codegraph__codegraph_context: 8000,
@@ -653,9 +678,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     return { perTool, totalCalls, totalConsumed, totalSaved };
   }, [entries]);
 
-  const formatMs = (ms: number | null) => ms === null ? "—" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const formatMs = (ms: number | null) => ms === null ? "-" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 
-  // Message queue — persisted server-side, synced via `queue:state` events.
+  // Message queue: persisted server-side and synced through `queue:state` events.
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 
   // Per-turn latency tracking
@@ -704,7 +729,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     };
   }, [turnTimings]);
 
-  // Pasted content — stored separately, shown as badges
+  // Pasted content: stored separately and shown as badges.
   const [pastedBlocks, setPastedBlocks] = useState<{ id: string; content: string; lineCount: number }[]>([]);
   const [fileBlocks, setFileBlocks] = useState<FileBlock[]>([]);
 
@@ -884,7 +909,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
 
       ws.onclose = () => {
         setConnected(false);
-        // Don't touch agentStatus — server process likely still running. Reconnect will resync.
+        // Do not touch agentStatus. The server process is likely still running, and reconnect will resync.
         if (cancelled) return;
         const delay = Math.min(10000, 500 * Math.pow(2, attempts++));
         reconnectTimer = setTimeout(connect, delay);
@@ -947,8 +972,8 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         setStreamingText("");
         currentTurnRef.current = { sentAt: Date.now() };
       } else if (msg.type === "agent:snapshot") {
-        // Upsert: patch the optimistic user bubble with the snapshot SHA, or —
-        // for a queued message dispatched by the server — append a new bubble.
+        // Upsert: patch the optimistic user bubble with the snapshot SHA.
+        // For a queued message dispatched by the server, append a new bubble.
         setEntries((prev) => {
           const updated = [...prev];
           let found = false;
@@ -1004,7 +1029,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             setAgentStatus("running");
           }
 
-          // Tool use start — flush text, begin tracking tool
+          // Tool use start: flush text and begin tracking the tool.
           if (inner?.type === "content_block_start" && inner.content_block?.type === "tool_use") {
             if (currentTurnRef.current && currentTurnRef.current.firstToolAt === undefined) {
               currentTurnRef.current.firstToolAt = Date.now();
@@ -1031,7 +1056,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             currentToolRef.current.inputJson += inner.delta.partial_json;
           }
 
-          // Tool use end — parse input and add entry
+          // Tool use end: parse input and add the entry.
           if (inner?.type === "content_block_stop" && currentToolRef.current) {
             const tool = currentToolRef.current;
             currentToolRef.current = null;
@@ -1060,7 +1085,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             }
           }
         } else if (ev.type === "assistant") {
-          // Complete assistant message — might contain tool_result
+          // Complete assistant message. It might contain tool_result.
           const blocks = ev.message?.content ?? [];
           for (const block of blocks) {
             if (block.type === "tool_result") {
@@ -1110,6 +1135,14 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             currentTurnRef.current.numTurns = ev.num_turns;
           }
         }
+      } else if (msg.type === "agent:raw") {
+        const text = typeof msg.data === "string" ? msg.data.trim() : "";
+        if (text) {
+          setEntries((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), role: "assistant", content: text },
+          ]);
+        }
       } else if (msg.type === "agent:done") {
         // Finalize turn timing
         if (currentTurnRef.current) {
@@ -1133,12 +1166,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         // turn is about to start, so stay busy and skip the "done" notification.
         if (!msg.willContinue) {
           setAgentStatus("idle");
-          if (document.hidden && Notification.permission === "granted") {
-            new Notification(`Overlord — ${project.name}`, {
-              body: "Claude a termine son travail.",
-              icon: "/favicon.ico",
-            });
-          }
+          notifyAgentDone(project.name);
+        } else {
+          setAgentStatus("running");
         }
       } else if (msg.type === "queue:state") {
         if (!msg.channel || msg.channel === channel) {
@@ -1280,7 +1310,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       Notification.requestPermission();
     }
 
-    // Send immediately only when the agent is idle AND the queue is empty —
+    // Send immediately only when the agent is idle and the queue is empty.
     // otherwise append to the persistent server-side queue to preserve order.
     if (agentStatus !== "idle" || messageQueue.length > 0) {
       wsRef.current.send(
@@ -1360,7 +1390,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     );
   }, [project.id, channel]);
 
-  // Queue management — all mutations go through the server (source of truth).
+  // Queue management: all mutations go through the server as the source of truth.
   const sendWs = useCallback((obj: object) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -1432,9 +1462,9 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
   const isWorking = agentStatus === "waiting" || agentStatus === "running";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-3 min-w-0">
           <span className="font-mono text-sm text-primary">
             claude @ {project.name}
@@ -1443,36 +1473,32 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             <Badge
               variant="outline"
               className="gap-1.5 text-[10px] border-purple-400/40 text-purple-400 animate-pulse"
-              title="L'agent analyse cette session pour en tirer des apprentissages"
+              title="The agent is analyzing this session to extract learnings"
             >
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-purple-400" />
-              Analyse de la session...
+              Analyzing session...
             </Badge>
           )}
-          {channel === "chat" && (
+          {channel === "chat" && (codegraphStatus.indexed || codegraphStatus.indexing) && (
             <Badge
               variant="outline"
               className={cn(
                 "gap-1.5 text-[10px]",
                 codegraphStatus.indexing && "border-amber-400/40 text-amber-400 animate-pulse",
-                !codegraphStatus.indexing && codegraphStatus.indexed && "border-emerald-400/40 text-emerald-400",
-                !codegraphStatus.indexing && !codegraphStatus.indexed && "border-zinc-400/40 text-zinc-400"
+                !codegraphStatus.indexing && codegraphStatus.indexed && "border-emerald-400/40 text-emerald-400"
               )}
               title={
                 codegraphStatus.indexing
-                  ? "CodeGraph est en train d'indexer le projet"
-                  : codegraphStatus.indexed
-                    ? "CodeGraph indexed — Claude utilise un index sémantique pour explorer le code"
-                    : "CodeGraph non indexé — clique sur 'Indexer' pour activer"
+                  ? "CodeGraph is indexing the project"
+                  : "CodeGraph indexed. Claude uses a semantic index to explore the code"
               }
             >
               <span className={cn(
                 "inline-block h-1.5 w-1.5 rounded-full",
                 codegraphStatus.indexing && "bg-amber-400",
-                !codegraphStatus.indexing && codegraphStatus.indexed && "bg-emerald-400",
-                !codegraphStatus.indexing && !codegraphStatus.indexed && "bg-zinc-400"
+                !codegraphStatus.indexing && codegraphStatus.indexed && "bg-emerald-400"
               )} />
-              {codegraphStatus.indexing ? "Indexation..." : codegraphStatus.indexed ? "Indexed" : "Not indexed"}
+              {codegraphStatus.indexing ? "Indexing..." : codegraphStatus.indexed ? "Indexed" : "Not indexed"}
             </Badge>
           )}
         </div>
@@ -1491,7 +1517,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           {resolvedModel && (
             <span
               className="hidden lg:inline text-[10px] text-muted-foreground font-mono"
-              title={`Modèle résolu par la CLI : ${resolvedModel}`}
+              title={`Model resolved by the CLI: ${resolvedModel}`}
             >
               → {formatModelVersion(resolvedModel)}
             </span>
@@ -1530,36 +1556,39 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                   )}
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
-                <div className="space-y-1.5 font-sans">
-                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong> — tokens envoyes a Claude (votre message + contexte projet)</p>
-                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong> — tokens generes par Claude (sa reponse)</p>
+              <TooltipContent
+                side="bottom"
+                className="w-[720px] max-w-[calc(100vw-2rem)] items-start border border-zinc-800 bg-zinc-950 px-4 py-3 text-xs leading-relaxed text-zinc-100 shadow-2xl [--tooltip-bg:theme(colors.zinc.950)]"
+              >
+                <div className="w-full space-y-1.5 font-sans">
+                  <p><strong>{formatTokens(tokenStats.inputTokens)} in</strong>: tokens sent to Claude (your message + project context)</p>
+                  <p><strong>{formatTokens(tokenStats.outputTokens)} out</strong>: tokens generated by Claude (its response)</p>
                   {tokenStats.cacheReadTokens > 0 && (
-                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong> — tokens lus depuis le cache au lieu d'etre re-traites (economie de cout)</p>
+                    <p><strong className="text-green-400">{formatTokens(tokenStats.cacheReadTokens)} cache</strong>: tokens read from cache instead of being reprocessed (cost savings)</p>
                   )}
-                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong> — cout API cumule de cette session ({tokenStats.turns} echange{tokenStats.turns > 1 ? "s" : ""})</p>
+                  <p><strong className="text-primary">${tokenStats.totalCost.toFixed(4)}</strong>: cumulative API cost for this session ({tokenStats.turns} exchange{tokenStats.turns > 1 ? "s" : ""})</p>
                   {rtkSavings && rtkSavings.total_saved > 0 && rtkSavings.avg_savings_pct < 100 && (
-                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong> — tokens economises par RTK sur {rtkSavings.total_commands} commandes shell (compresse git status, ls, etc.)</p>
+                    <p><strong className="text-emerald-400">RTK -{Math.round(rtkSavings.avg_savings_pct)}%</strong>: tokens saved by RTK across {rtkSavings.total_commands} shell commands (compresses git status, ls, etc.)</p>
                   )}
                   {codegraphStatus.indexed && (
                     <div className="border-t border-border/50 pt-1.5 mt-1.5">
-                      <p><strong className="text-cyan-400">Codegraph</strong> — {codegraphStats.totalCalls} appel{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
+                      <p><strong className="text-cyan-400">Codegraph</strong>: {codegraphStats.totalCalls} call{codegraphStats.totalCalls > 1 ? "s" : ""}</p>
                       {codegraphStats.totalCalls > 0 ? (
                         <>
-                          <p className="text-muted-foreground">Consomme: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (resultats lus par Claude)</p>
-                          <p className="text-muted-foreground">Estime epargne: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs Read/Grep equivalents</p>
-                          <p className="text-[10px] italic opacity-60 mt-1">Heuristique arbitraire (8k/context, 5k/callers, 3k/search, 0.5k/files). Ratio epargne/consomme = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "—"}x.</p>
+                          <p className="text-muted-foreground">Consumed: <strong>{formatTokens(codegraphStats.totalConsumed)}</strong> tokens (results read by Claude)</p>
+                          <p className="text-muted-foreground">Estimated savings: <strong className="text-cyan-400">~{formatTokens(codegraphStats.totalSaved)}</strong> tokens vs equivalent Read/Grep calls</p>
+                          <p className="text-[10px] italic opacity-60 mt-1">Rough heuristic (8k/context, 5k/callers, 3k/search, 0.5k/files). Saved/consumed ratio = {codegraphStats.totalConsumed > 0 ? (codegraphStats.totalSaved / codegraphStats.totalConsumed).toFixed(1) : "-"}x.</p>
                           <div className="mt-1 space-y-0.5">
                             {Object.entries(codegraphStats.perTool).map(([tool, s]) => (
                               <p key={tool} className="text-[10px] text-muted-foreground font-mono">
-                                {tool.replace("mcp__codegraph__codegraph_", "")}: {s.calls}× — {formatTokens(s.consumed)} in / ~{formatTokens(s.saved)} saved
+                                {tool.replace("mcp__codegraph__codegraph_", "")}: {s.calls}x, {formatTokens(s.consumed)} in / ~{formatTokens(s.saved)} saved
                               </p>
                             ))}
                           </div>
                         </>
                       ) : (
                         <p className="text-[10px] italic opacity-60 mt-1">
-                          MCP active mais Claude ne l'a pas appele. Mentionne-le dans ton message ("utilise codegraph...") ou ajoute une nudge dans le system prompt projet.
+                          MCP is active but Claude did not call it. Mention it in your message ("use codegraph...") or add a nudge to the project system prompt.
                         </p>
                       )}
                     </div>
@@ -1574,7 +1603,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
                           <tr><td className="text-muted-foreground pr-2">TTFA (1er tool)</td><td>{formatMs(latencyStats.lastTTFA)}</td></tr>
                           <tr><td className="text-muted-foreground pr-2">API time</td><td>{formatMs(latencyStats.lastApi)}</td></tr>
                           <tr><td className="text-muted-foreground pr-2">Total wall</td><td>{formatMs(latencyStats.lastTotal)}</td></tr>
-                          <tr><td className="text-muted-foreground pr-2">Model turns</td><td>{latencyStats.lastNumTurns ?? "—"}</td></tr>
+                          <tr><td className="text-muted-foreground pr-2">Model turns</td><td>{latencyStats.lastNumTurns ?? "-"}</td></tr>
                         </tbody>
                       </table>
                       {latencyStats.sampleSize > 1 && (
@@ -1605,7 +1634,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               connected ? "text-green-400" : "text-red-400"
             )}
           >
-            {connected ? "connecte" : "deconnecte"}
+            {connected ? "connected" : "disconnected"}
           </span>
         </div>
       </div>
@@ -1621,8 +1650,8 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           )}
         >
           {agentStatus === "waiting"
-            ? `Claude demarre... (${formatElapsed(elapsed)})`
-            : `Claude travaille... (${formatElapsed(elapsed)})`}
+            ? `Claude is starting... (${formatElapsed(elapsed)})`
+            : `Claude is working... (${formatElapsed(elapsed)})`}
         </div>
       )}
 
@@ -1637,17 +1666,17 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               disabled={loadingOlder}
               className="text-xs text-muted-foreground"
             >
-              {loadingOlder ? "Chargement..." : `Charger les messages precedents (${firstLoadedIndex} restants)`}
+              {loadingOlder ? "Loading..." : `Load previous messages (${firstLoadedIndex} remaining)`}
             </Button>
           </div>
         )}
         {entries.length === 0 && !streamingText && agentStatus === "idle" && (
           <p className="text-center text-sm text-muted-foreground py-12">
-            Demarrer une conversation avec Claude sur{" "}
+            Start a conversation with Claude about{" "}
             <strong className="text-foreground">{project.name}</strong>
             <br />
             <span className="text-xs mt-1 inline-block">
-              Tape <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-mono">/</kbd> pour les commandes
+              Type <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-mono">/</kbd> for commands
             </span>
           </p>
         )}
@@ -1703,31 +1732,31 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
               <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
               <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
               <span className="ml-2 text-[11px] text-muted-foreground">
-                {agentStatus === "waiting" ? `Démarrage... ${formatElapsed(elapsed)}` : `${formatElapsed(elapsed)}`}
+                {agentStatus === "waiting" ? `Starting... ${formatElapsed(elapsed)}` : `${formatElapsed(elapsed)}`}
               </span>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Scroll to bottom button */}
-      {showScrollBtn && (
-        <div className="flex justify-center -mt-10 relative z-10 pointer-events-none">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-7 gap-1.5 rounded-full px-3 text-xs shadow-lg pointer-events-auto border border-border"
-            onClick={scrollToBottom}
-          >
-            <ArrowDown className="h-3 w-3" />
-            Dernier message
-          </Button>
-        </div>
-      )}
+        {/* Scroll to bottom button */}
+        {showScrollBtn && (
+          <div className="sticky bottom-2 z-10 flex justify-center pointer-events-none">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-7 gap-1.5 rounded-full px-3 text-xs shadow-lg pointer-events-auto border border-border"
+              onClick={scrollToBottom}
+            >
+              <ArrowDown className="h-3 w-3" />
+              Latest message
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* Workspace scope selector */}
       {workspacePackages.length > 0 && (
-        <div className="relative z-10 flex items-center gap-1.5 border-t border-border bg-card px-5 py-1.5 overflow-x-auto scrollbar-visible">
+        <div className="relative z-10 flex shrink-0 items-center gap-1.5 border-t border-border bg-card px-5 py-1.5 overflow-x-auto scrollbar-visible">
           <span className="text-[10px] text-muted-foreground shrink-0 mr-1">Scope:</span>
           {workspacePackages.map((pkg) => (
             <button
@@ -1755,7 +1784,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       )}
 
       {/* Input area */}
-      <div className="relative border-t border-border bg-card p-4">
+      <div className="relative shrink-0 border-t border-border bg-card p-4">
         {showSlash && filteredCommands.length > 0 && (
           <div className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg scrollbar-visible">
             {filteredCommands.map((cmd, i) => (
@@ -1874,7 +1903,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         />
 
         <div
-          className="flex items-stretch gap-2"
+          className="relative flex items-stretch"
           style={{ minHeight: "12vh", maxHeight: "20vh" }}
         >
           <RichPasteInput
@@ -1915,33 +1944,49 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
             speechLang="fr-FR"
             placeholder={
               isWorking
-                ? `Taper un message (sera envoye quand Claude aura fini)...`
-                : `Message ou / pour les commandes...`
+                ? `Type a message (it will be sent when Claude is done)...`
+                : `Message or / for commands...`
             }
             disabled={!connected}
-            className={cn(isWorking ? "border-yellow-400/30" : "border-border")}
-          />
-          <div className="flex flex-col justify-end gap-1.5">
-            {isWorking && (
-              <Button
-                variant="destructive"
-                size="sm"
-                className="gap-1.5"
-                onClick={handleStop}
-              >
-                <Square className="h-3 w-3" />
-                Stop
-              </Button>
+            className={cn(
+              "pb-12 pr-16",
+              isWorking ? "border-yellow-400/30" : "border-border"
             )}
-            <Button
-              onClick={handleSend}
-              disabled={!connected || (!input.trim() && pastedBlocks.length === 0 && fileBlocks.length === 0)}
-              variant={isWorking || messageQueue.length > 0 ? "secondary" : "default"}
-            >
-              {isWorking || messageQueue.length > 0
-                ? `En file (${messageQueue.length + 1})`
-                : "Envoyer"}
-            </Button>
+          />
+          <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5">
+            {isWorking && (
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon-sm"
+                    onClick={handleStop}
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  Stop
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!connected || (!input.trim() && pastedBlocks.length === 0 && fileBlocks.length === 0)}
+                  variant={isWorking ? "secondary" : "default"}
+                  size="icon-sm"
+                >
+                  <SendHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                {isWorking ? `Add to queue (${messageQueue.length + 1})` : "Send"}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>

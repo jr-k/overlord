@@ -20,7 +20,7 @@ function safeName(name: string): string {
   return basename(name).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "file";
 }
 
-// POST /api/uploads — multipart/form-data with `file` and `projectId`
+// POST /api/uploads: multipart/form-data with `file` and `projectId`
 app.post("/", async (c) => {
   const body = await c.req.parseBody();
   const file = body["file"];
@@ -48,7 +48,7 @@ app.post("/", async (c) => {
   });
 });
 
-// DELETE /api/uploads/:id?projectId=N — removes a previously uploaded file
+// DELETE /api/uploads/:id?projectId=N: removes a previously uploaded file
 app.delete("/:id", (c) => {
   const id = c.req.param("id");
   const projectId = c.req.query("projectId");

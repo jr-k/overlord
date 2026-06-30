@@ -23,7 +23,7 @@ interface InsightsData {
   tools: Record<string, number>; models: Record<string, number>;
 }
 
-const DOWS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function fmt(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(1) + " G";
@@ -79,7 +79,7 @@ function Kpi({ value, label }: { value: string; label: string }) {
 
 function Momentum({ recent, prev }: { recent: number; prev: number }) {
   if (prev === 0 && recent === 0) return <Minus className="h-3.5 w-3.5 text-muted-foreground" />;
-  if (recent > prev * 1.15) return <span className="inline-flex items-center gap-0.5 text-emerald-400 text-[11px]"><TrendingUp className="h-3.5 w-3.5" />{prev ? "+" + Math.round(((recent - prev) / prev) * 100) + "%" : "neuf"}</span>;
+  if (recent > prev * 1.15) return <span className="inline-flex items-center gap-0.5 text-emerald-400 text-[11px]"><TrendingUp className="h-3.5 w-3.5" />{prev ? "+" + Math.round(((recent - prev) / prev) * 100) + "%" : "new"}</span>;
   if (recent < prev * 0.85) return <span className="inline-flex items-center gap-0.5 text-orange-400 text-[11px]"><TrendingDown className="h-3.5 w-3.5" />{Math.round(((recent - prev) / prev) * 100) + "%"}</span>;
   return <Minus className="h-3.5 w-3.5 text-muted-foreground" />;
 }
@@ -124,15 +124,15 @@ function buildCalendar(byDay: Record<string, { prompts: number; toolUses: number
 
 function achievements(d: InsightsData): { emoji: string; title: string; sub: string }[] {
   const out: { emoji: string; title: string; sub: string }[] = [];
-  if (d.streak.current >= 7) out.push({ emoji: "🔥", title: "En feu", sub: `${d.streak.current} jours d'affilée` });
-  if (d.peakHour >= 22 || d.peakHour < 5) out.push({ emoji: "🦉", title: "Noctambule", sub: `pic à ${d.peakHour}h` });
-  if (d.longestSession && d.longestSession.ms >= 90 * 60000) out.push({ emoji: "🏃", title: "Marathonien", sub: `${fmtDur(Math.round(d.longestSession.ms / 60000))} d'affilée` });
-  if (d.totals.toolUses >= 5000) out.push({ emoji: "🛠️", title: "Forgeron", sub: `${fmt(d.totals.toolUses)} appels d'outils` });
-  if (d.byProject.length >= 8) out.push({ emoji: "🤹", title: "Jongleur", sub: `${d.byProject.length} projets en parallèle` });
-  if (d.totals.activeMin / 60 >= 40) out.push({ emoji: "⚡", title: "Grosse cadence", sub: `${Math.round(d.totals.activeMin / 60)}h de travail actif` });
+  if (d.streak.current >= 7) out.push({ emoji: "🔥", title: "On fire", sub: `${d.streak.current} days in a row` });
+  if (d.peakHour >= 22 || d.peakHour < 5) out.push({ emoji: "🦉", title: "Night owl", sub: `peak at ${d.peakHour}:00` });
+  if (d.longestSession && d.longestSession.ms >= 90 * 60000) out.push({ emoji: "🏃", title: "Marathoner", sub: `${fmtDur(Math.round(d.longestSession.ms / 60000))} in one sitting` });
+  if (d.totals.toolUses >= 5000) out.push({ emoji: "🛠️", title: "Toolsmith", sub: `${fmt(d.totals.toolUses)} tool calls` });
+  if (d.byProject.length >= 8) out.push({ emoji: "🤹", title: "Juggler", sub: `${d.byProject.length} parallel projects` });
+  if (d.totals.activeMin / 60 >= 40) out.push({ emoji: "⚡", title: "High tempo", sub: `${Math.round(d.totals.activeMin / 60)}h of active work` });
   const wkend = d.byDow[0] + d.byDow[6], total = d.byDow.reduce((a, b) => a + b, 0);
-  if (total > 0 && wkend / total > 0.3) out.push({ emoji: "🌙", title: "Weekend warrior", sub: `${Math.round((wkend / total) * 100)}% le week-end` });
-  if (d.totals.cost >= 5000) out.push({ emoji: "💎", title: "Power user", sub: `${fmtUsd(d.totals.cost)} de valeur générée` });
+  if (total > 0 && wkend / total > 0.3) out.push({ emoji: "🌙", title: "Weekend warrior", sub: `${Math.round((wkend / total) * 100)}% on weekends` });
+  if (d.totals.cost >= 5000) out.push({ emoji: "💎", title: "Power user", sub: `${fmtUsd(d.totals.cost)} generated value` });
   return out.slice(0, 6);
 }
 
@@ -140,8 +140,8 @@ export function InsightsTab() {
   const [days, setDays] = useState(30);
   const { data, loading, refetch } = useApi<InsightsData>(`/insights?days=${days}`);
 
-  if (loading && !data) return <div className="p-8 text-muted-foreground text-sm">Analyse des transcripts…</div>;
-  if (!data || data.byProject.length === 0) return <div className="p-8 text-muted-foreground text-sm">Aucune activité trouvée sur la période.</div>;
+  if (loading && !data) return <div className="p-8 text-muted-foreground text-sm">Analyzing transcripts...</div>;
+  if (!data || data.byProject.length === 0) return <div className="p-8 text-muted-foreground text-sm">No activity found for this period.</div>;
 
   const dayKeys = Object.keys(data.byDay).sort();
   const maxDay = Math.max(1, ...dayKeys.map((d) => data.byDay[d].prompts + data.byDay[d].toolUses));
@@ -180,14 +180,14 @@ export function InsightsTab() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent">Insights</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {dayKeys[0]} → {dayKeys[dayKeys.length - 1]} · {data.byProject.length} projets actifs
+            {dayKeys[0]} to {dayKeys[dayKeys.length - 1]} · {data.byProject.length} active projects
           </p>
         </div>
         <div className="flex items-center gap-2">
           {[{ v: 7, l: "7j" }, { v: 30, l: "30j" }, { v: 90, l: "90j" }, { v: 0, l: "Tout" }].map(({ v, l }) => (
             <Button key={v} size="sm" variant={days === v ? "default" : "outline"} onClick={() => setDays(v)}>{l}</Button>
           ))}
-          <Button size="sm" variant="ghost" onClick={() => fetch(`/api/insights?days=${days}&refresh=1`).then(refetch)} title="Recalculer">
+          <Button size="sm" variant="ghost" onClick={() => fetch(`/api/insights?days=${days}&refresh=1`).then(refetch)} title="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
@@ -195,10 +195,10 @@ export function InsightsTab() {
 
       {/* Feature band */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <FeatureCard icon={<Clock className="h-5 w-5" />} value={fmtDur(data.totals.activeMin)} label="Temps de travail actif" sub="estimé, hors temps mort" from="from-sky-500" to="to-blue-500" />
-        <FeatureCard icon={<Sparkles className="h-5 w-5" />} value={fmtUsd(data.totals.cost)} label="Valeur générée" sub="coût API équivalent" from="from-violet-500" to="to-fuchsia-500" />
-        <FeatureCard icon={<Flame className="h-5 w-5" />} value={`${data.streak.current} j`} label="Streak en cours" sub={`record : ${data.streak.longest} j`} from="from-orange-500" to="to-red-500" />
-        <FeatureCard icon={<Zap className="h-5 w-5" />} value={data.longestSession ? fmtDur(Math.round(data.longestSession.ms / 60000)) : "—"} label="Plus longue session" sub={data.longestSession ? `${data.longestSession.project} · ${data.longestSession.date}` : ""} from="from-amber-500" to="to-yellow-500" />
+        <FeatureCard icon={<Clock className="h-5 w-5" />} value={fmtDur(data.totals.activeMin)} label="Active work time" sub="estimated, excluding idle time" from="from-sky-500" to="to-blue-500" />
+        <FeatureCard icon={<Sparkles className="h-5 w-5" />} value={fmtUsd(data.totals.cost)} label="Generated value" sub="equivalent API cost" from="from-violet-500" to="to-fuchsia-500" />
+        <FeatureCard icon={<Flame className="h-5 w-5" />} value={`${data.streak.current}d`} label="Current streak" sub={`record: ${data.streak.longest}d`} from="from-orange-500" to="to-red-500" />
+        <FeatureCard icon={<Zap className="h-5 w-5" />} value={data.longestSession ? fmtDur(Math.round(data.longestSession.ms / 60000)) : "-"} label="Longest session" sub={data.longestSession ? `${data.longestSession.project} · ${data.longestSession.date}` : ""} from="from-amber-500" to="to-yellow-500" />
       </div>
 
       {/* Achievements */}
@@ -220,10 +220,10 @@ export function InsightsTab() {
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
         <Kpi value={String(data.totals.prompts)} label="Prompts" />
         <Kpi value={String(data.totals.sessions)} label="Sessions" />
-        <Kpi value={fmt(data.totals.toolUses)} label="Appels d'outils" />
-        <Kpi value={fmt(data.totals.assistantMsgs)} label="Réponses agent" />
-        <Kpi value={fmt(data.totals.outputTokens)} label="Tokens générés" />
-        <Kpi value={`${dayKeys.length}/${data.days}`} label="Jours actifs" />
+        <Kpi value={fmt(data.totals.toolUses)} label="Tool calls" />
+        <Kpi value={fmt(data.totals.assistantMsgs)} label="Agent replies" />
+        <Kpi value={fmt(data.totals.outputTokens)} label="Generated tokens" />
+        <Kpi value={`${dayKeys.length}/${data.days}`} label="Active days" />
       </div>
 
       {/* Tokens */}
@@ -275,8 +275,8 @@ export function InsightsTab() {
       {/* Calendar */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Activité quotidienne</h2>
-          {data.busiestDay && <span className="text-xs text-muted-foreground">Pic : <b className="text-foreground">{data.busiestDay.date}</b> ({fmt(data.busiestDay.count)})</span>}
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Daily activity</h2>
+          {data.busiestDay && <span className="text-xs text-muted-foreground">Peak: <b className="text-foreground">{data.busiestDay.date}</b> ({fmt(data.busiestDay.count)})</span>}
         </div>
         <Card className="p-5">
           <div className="flex gap-[3px] overflow-x-auto">
@@ -291,9 +291,9 @@ export function InsightsTab() {
             ))}
           </div>
           <div className="flex items-center gap-1.5 justify-end text-[11px] text-muted-foreground mt-3">
-            Moins
+            Less
             {[0, 0.2, 0.45, 0.7, 1].map((t, i) => <span key={i} className="w-[12px] h-[12px] rounded-[3px]" style={{ background: heat(t) }} />)}
-            Plus
+            More
           </div>
         </Card>
       </section>
@@ -301,7 +301,7 @@ export function InsightsTab() {
       {/* Hour + DOW */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <section>
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Par heure <span className="normal-case text-foreground/70">· pic à {data.peakHour}h</span></h2>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">By hour <span className="normal-case text-foreground/70">· peak at {data.peakHour}:00</span></h2>
           <Card className="p-5">
             <div className="flex items-end gap-1 h-[110px]">
               {data.byHour.map((v, i) => (
@@ -312,7 +312,7 @@ export function InsightsTab() {
           </Card>
         </section>
         <section>
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Par jour <span className="normal-case text-foreground/70">· {DOWS[data.peakDow]} en tête</span></h2>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">By day <span className="normal-case text-foreground/70">· {DOWS[data.peakDow]} leads</span></h2>
           <Card className="p-5">
             <div className="flex gap-2.5 items-end">
               {DOWS.map((d, i) => (
@@ -330,7 +330,7 @@ export function InsightsTab() {
 
       {/* Project leaderboard */}
       <section>
-        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Classement projets</h2>
+        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Project leaderboard</h2>
         <Card className="p-5 space-y-3">
           {data.byProject.map((p, i) => (
             <div key={p.dir} className="grid grid-cols-[20px_150px_1fr_auto] items-center gap-3 text-[13px]">
@@ -341,9 +341,9 @@ export function InsightsTab() {
               </div>
               <div className="flex items-center gap-3 justify-end w-[210px]">
                 <Momentum recent={p.recent} prev={p.prev} />
-                <span className="text-muted-foreground tabular-nums w-[44px] text-right" title="prompts + outils">{fmt(p.prompts + p.toolUses)}</span>
-                <span className="text-muted-foreground tabular-nums w-[40px] text-right" title="temps actif">{fmtDur(p.activeMin)}</span>
-                <span className="text-violet-400/80 tabular-nums w-[46px] text-right" title="coût API équivalent">{fmtUsd(p.cost)}</span>
+                <span className="text-muted-foreground tabular-nums w-[44px] text-right" title="prompts + tools">{fmt(p.prompts + p.toolUses)}</span>
+                <span className="text-muted-foreground tabular-nums w-[40px] text-right" title="active time">{fmtDur(p.activeMin)}</span>
+                <span className="text-violet-400/80 tabular-nums w-[46px] text-right" title="equivalent API cost">{fmtUsd(p.cost)}</span>
               </div>
             </div>
           ))}
@@ -353,18 +353,18 @@ export function InsightsTab() {
       {/* Tools + MCP */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <section>
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Outils natifs</h2>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Native tools</h2>
           <Card className="p-5"><Bars rows={nativeTools.map(([t, c]) => [prettyTool(t), c])} max={maxNative} /></Card>
         </section>
         <section>
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Serveurs MCP</h2>
-          <Card className="p-5">{mcpRows.length ? <Bars rows={mcpRows} max={maxMcp} /> : <div className="text-sm text-muted-foreground">Aucun appel MCP.</div>}</Card>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">MCP servers</h2>
+          <Card className="p-5">{mcpRows.length ? <Bars rows={mcpRows} max={maxMcp} /> : <div className="text-sm text-muted-foreground">No MCP calls.</div>}</Card>
         </section>
       </div>
 
       {/* Models */}
       <section>
-        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Modèles</h2>
+        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">Models</h2>
         <Card className="p-5"><Bars rows={models} max={maxModel} /></Card>
       </section>
 
@@ -372,11 +372,11 @@ export function InsightsTab() {
       <section>
         <div className="flex items-center gap-2 mb-3">
           <Trophy className="h-3.5 w-3.5 text-muted-foreground" />
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Détail par projet</h2>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Project detail</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.byProject.map((p) => {
-            const dr = p.first ? `${new Date(p.first).toISOString().slice(0, 10)} → ${new Date(p.last!).toISOString().slice(0, 10)}` : "";
+            const dr = p.first ? `${new Date(p.first).toISOString().slice(0, 10)} to ${new Date(p.last!).toISOString().slice(0, 10)}` : "";
             return (
               <Card key={p.dir} className="p-4">
                 <div className="flex items-center justify-between">
@@ -386,11 +386,11 @@ export function InsightsTab() {
                 <div className="text-[11px] text-muted-foreground tabular-nums mt-0.5">{dr}</div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
                   <span><b className="text-indigo-400">{p.prompts}</b> prompts</span>
-                  <span><b className="text-indigo-400">{fmt(p.toolUses)}</b> outils</span>
+                  <span><b className="text-indigo-400">{fmt(p.toolUses)}</b> tools</span>
                   <span><b className="text-indigo-400">{p.sessions}</b> sessions</span>
-                  <span><b className="text-indigo-400">{p.days}</b> j actifs</span>
-                  <span><b className="text-indigo-400">{fmtDur(p.activeMin)}</b> actif</span>
-                  <span><b className="text-violet-400">{fmtUsd(p.cost)}</b> valeur</span>
+                  <span><b className="text-indigo-400">{p.days}</b> active days</span>
+                  <span><b className="text-indigo-400">{fmtDur(p.activeMin)}</b> active</span>
+                  <span><b className="text-violet-400">{fmtUsd(p.cost)}</b> value</span>
                 </div>
               </Card>
             );
@@ -399,9 +399,9 @@ export function InsightsTab() {
       </section>
 
       <p className="text-xs text-muted-foreground border-t border-border pt-4">
-        Source : ~/.claude/projects (sessions locales, par répertoire). Prompts = messages humains hors méta-prompts auto-générés.
-        « Valeur générée » = coût équivalent aux tarifs API Opus ({fmt(data.totals.cacheTokens)} tokens de cache inclus) — indicatif, non facturé sous abonnement.
-        Temps actif estimé en sommant les intervalles &lt; 5 min entre événements. Recalculé toutes les 2 min.
+        Source: ~/.claude/projects (local sessions by directory). Prompts are human messages, excluding generated meta prompts.
+        "Generated value" is the equivalent cost at Opus API prices, including {fmt(data.totals.cacheTokens)} cache tokens. It is indicative and not billed under a subscription.
+        Active time is estimated by summing intervals shorter than 5 minutes between events. Recalculated every 2 minutes.
       </p>
     </div>
   );

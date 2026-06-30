@@ -15,6 +15,6 @@
     },
     "ignoreDeprecations": "6.0"
   },
-  "include": ["server/**/*", "src/**/*"],
+  "include": ["electron/**/*", "server/**/*", "src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
