@@ -30,15 +30,17 @@ export const OVERLORD_MCP_TOOLS = [
   "mcp__overlord__overlord_list_projects",
   "mcp__overlord__overlord_get_project",
   "mcp__overlord__overlord_ask_project",
+  "mcp__overlord__overlord_request_tool",
 ];
 
 const DEFAULT_SYSTEM_PROMPT = "Match the language of the user's message in your response. When you respond in French, always use proper French accents.";
 
 interface Props {
   project: Project;
+  onProjectUpdate?: () => void;
 }
 
-export function SettingsTab({ project }: Props) {
+export function SettingsTab({ project, onProjectUpdate }: Props) {
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt ?? "");
   const [model, setModel] = useState(project.model ?? "");
   const models = useModels();
@@ -49,8 +51,23 @@ export function SettingsTab({ project }: Props) {
     }
     return new Set([...DEFAULT_TOOLS, ...OVERLORD_MCP_TOOLS]);
   });
+  const [customTool, setCustomTool] = useState("");
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
+
+  // Tools the user added by hand (anything not in the built-in / Overlord presets) —
+  // e.g. an MCP server like `mcp__claude_ai_Gmail`. Lets any tool be allowed from
+  // config, without hardcoding it in the server.
+  const KNOWN_TOOLS = new Set([...DEFAULT_TOOLS, ...OVERLORD_MCP_TOOLS]);
+  const customTools = [...selectedTools].filter((t) => !KNOWN_TOOLS.has(t)).sort();
+
+  const addCustomTool = useCallback(() => {
+    const tool = customTool.trim();
+    if (!tool) return;
+    setSelectedTools((prev) => new Set(prev).add(tool));
+    setCustomTool("");
+    setDirty(true);
+  }, [customTool]);
   const [effectivePrompt, setEffectivePrompt] = useState<{
     base: string;
     nudges: { name: string; content: string; reason: string }[];
@@ -93,7 +110,10 @@ export function SettingsTab({ project }: Props) {
     setSaved(true);
     setDirty(false);
     setTimeout(() => setSaved(false), 2000);
-  }, [project.id, systemPrompt, model, selectedTools, learningsEnabled]);
+    // Refresh the parent so `project` reflects the saved value — otherwise
+    // switching tabs remounts this with a stale prop and the change "vanishes".
+    onProjectUpdate?.();
+  }, [project.id, systemPrompt, model, selectedTools, learningsEnabled, onProjectUpdate]);
 
   const handleReset = useCallback(() => {
     setSystemPrompt("");
@@ -209,6 +229,44 @@ export function SettingsTab({ project }: Props) {
                       onToggle={toggleTool}
                     />
                   ))}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Custom / MCP tools
+                </div>
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  Allow any other tool by name. For an MCP server, the server-level form allows all
+                  its tools — e.g. <code className="font-mono">mcp__claude_ai_Gmail</code>.
+                </p>
+                {customTools.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {customTools.map((tool) => (
+                      <button
+                        key={tool}
+                        onClick={() => toggleTool(tool)}
+                        title="Remove"
+                        className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-mono text-primary-foreground transition-colors hover:bg-primary/80"
+                      >
+                        {tool}
+                        <Trash2 className="h-3 w-3 opacity-70" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    value={customTool}
+                    onChange={(e) => setCustomTool(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); addCustomTool(); }
+                    }}
+                    placeholder="mcp__claude_ai_Gmail"
+                    className="h-8 font-mono text-xs"
+                  />
+                  <Button size="sm" variant="outline" onClick={addCustomTool} disabled={!customTool.trim()}>
+                    Add
+                  </Button>
                 </div>
               </div>
             </CardContent>

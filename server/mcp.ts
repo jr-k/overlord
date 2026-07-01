@@ -153,6 +153,37 @@ server.tool(
   }
 );
 
+// ─── Self-service tool access ────────────────────────────────
+
+server.tool(
+  "overlord_request_tool",
+  "Request access to a tool you are not currently allowed to use. You CANNOT grant yourself tools — this files a request that the user approves or denies from Overlord's UI. Use this when a tool call was denied because it is not in the allowlist (e.g. an MCP tool that exists but is not permitted). For an MCP server, request the server-level name to cover all its tools (e.g. 'mcp__claude_ai_Gmail' rather than one specific Gmail tool). After requesting, tell the user a request is pending their approval and stop trying that tool until they approve.",
+  {
+    projectId: z.number().describe("The current project ID"),
+    tool: z.string().describe("Exact tool name to request, e.g. 'mcp__claude_ai_Gmail' or 'WebSearch'"),
+    reason: z.string().optional().describe("Short justification shown to the user for why you need it"),
+  },
+  async ({ projectId, tool, reason }) => {
+    const res = await api(`/tool-requests/${projectId}`, {
+      method: "POST",
+      body: JSON.stringify({ tool, reason }),
+    });
+    if (res.status === "already_allowed") {
+      return { content: [{ type: "text", text: `'${tool}' is already allowed — just use it.` }] };
+    }
+    if (res.error) {
+      return { content: [{ type: "text", text: `Could not file request: ${res.error}` }] };
+    }
+    const note = res.deduped ? " (a request for this tool was already pending)" : "";
+    return {
+      content: [{
+        type: "text",
+        text: `Requested access to '${tool}'${note}. It is now PENDING the user's approval in Overlord (Settings / chat banner). Do not retry this tool until the user approves it — tell them a request is waiting.`,
+      }],
+    };
+  }
+);
+
 // ─── Start ───────────────────────────────────────────────────
 
 async function main() {

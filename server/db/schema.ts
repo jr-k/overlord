@@ -132,6 +132,25 @@ export const todos = sqliteTable("todos", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Tool-access requests raised by the agent (overlord_request_tool). The agent
+// can never grant itself a tool — it files a pending request that the user
+// approves/denies from the UI. Approval appends the tool to project.allowedTools.
+export const toolRequests = sqliteTable("tool_requests", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  tool: text("tool").notNull(),
+  reason: text("reason"),
+  status: text("status", { enum: ["pending", "approved", "denied"] })
+    .notNull()
+    .default("pending"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  resolvedAt: text("resolved_at"),
+});
+
 // Messages typed while the agent is busy. Persisted so they survive
 // reloads, app kills, and WebSocket reconnects. Drained server-side.
 export const queuedMessages = sqliteTable("queued_messages", {

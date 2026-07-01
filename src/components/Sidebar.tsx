@@ -34,6 +34,42 @@ const AGENT_STATUS_STYLES: Record<string, string> = {
   error:   "bg-red-400 shadow-[0_0_4px_rgba(248,113,113,0.4)]",
 };
 
+type SortKey = "name" | "created" | "updated";
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "name", label: "A → Z" },
+  { value: "created", label: "Création" },
+  { value: "updated", label: "Maj récente" },
+];
+
+// Alphabetical ascending; dates newest-first (the useful default for both).
+function sortProjects(list: Project[], key: SortKey): Project[] {
+  const sorted = [...list];
+  if (key === "name") {
+    sorted.sort((a, b) => a.name.localeCompare(b.name));
+  } else {
+    const field = key === "created" ? "createdAt" : "updatedAt";
+    sorted.sort((a, b) => (b[field] ?? "").localeCompare(a[field] ?? ""));
+  }
+  return sorted;
+}
+
+function SortSelect({ value, onChange }: { value: SortKey; onChange: (v: SortKey) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as SortKey)}
+      onClick={(e) => e.stopPropagation()}
+      title="Trier les projets"
+      className="ml-auto rounded border border-border bg-transparent px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer"
+    >
+      {SORT_OPTIONS.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
 type AppInfo = {
   version: string;
   githubUrl: string;
@@ -92,6 +128,21 @@ export function ProjectSidebar({
 }: Props) {
   const [search, setSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  // Independent sort state for favorites vs the main project list, persisted.
+  const [favSort, setFavSort] = useState<SortKey>(
+    () => (localStorage.getItem("overlord:favSort") as SortKey) || "name"
+  );
+  const [projSort, setProjSort] = useState<SortKey>(
+    () => (localStorage.getItem("overlord:projSort") as SortKey) || "name"
+  );
+  const changeFavSort = useCallback((v: SortKey) => {
+    setFavSort(v);
+    localStorage.setItem("overlord:favSort", v);
+  }, []);
+  const changeProjSort = useCallback((v: SortKey) => {
+    setProjSort(v);
+    localStorage.setItem("overlord:projSort", v);
+  }, []);
   const [creating, setCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
@@ -123,8 +174,14 @@ export function ProjectSidebar({
     return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }, [projects, search, showHidden]);
 
-  const favorites = useMemo(() => filtered.filter((p) => p.favorite), [filtered]);
-  const others = useMemo(() => filtered.filter((p) => !p.favorite), [filtered]);
+  const favorites = useMemo(
+    () => sortProjects(filtered.filter((p) => p.favorite), favSort),
+    [filtered, favSort]
+  );
+  const others = useMemo(
+    () => sortProjects(filtered.filter((p) => !p.favorite), projSort),
+    [filtered, projSort]
+  );
   const visibleProjectCount = useMemo(
     () => projects.filter((p) => !p.hidden).length,
     [projects]
@@ -239,9 +296,10 @@ export function ProjectSidebar({
       <SidebarContent>
         {favorites.length > 0 && (
           <SidebarGroup>
-          <SidebarGroupLabel>
-            Favorites <span className="ml-1 text-muted-foreground">({favorites.length})</span>
-          </SidebarGroupLabel>
+            <SidebarGroupLabel className="flex items-center">
+              Favoris <span className="ml-1 text-muted-foreground">({favorites.length})</span>
+              <SortSelect value={favSort} onChange={changeFavSort} />
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">{favorites.map(renderProject)}</SidebarMenu>
             </SidebarGroupContent>
@@ -249,8 +307,9 @@ export function ProjectSidebar({
         )}
 
         <SidebarGroup>
-          <SidebarGroupLabel>
-            Projects <span className="ml-1 text-muted-foreground">({visibleProjectCount})</span>
+          <SidebarGroupLabel className="flex items-center">
+            Projets <span className="ml-1 text-muted-foreground">({visibleProjectCount})</span>
+            <SortSelect value={projSort} onChange={changeProjSort} />
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">

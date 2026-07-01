@@ -64,6 +64,8 @@ function getProjectRoute(project: Project, tab: string) {
 
 export function App() {
   const { data: workspaceSettings, refetch: refetchWorkspaceSettings } = useApi<WorkspaceSettings>("/settings/workspace");
+  // Load hidden projects too — the sidebar filters them client-side, and its
+  // "Afficher les cachés" toggle needs them present to reveal anything.
   const { data: projects, refetch } = useApi<Project[]>("/projects?hidden=true");
   const [selected, setSelected] = useState<Project | null>(null);
   const [tab, setTab] = useState<string>(() => {
@@ -116,6 +118,15 @@ export function App() {
     }
     setRestored(true);
   }, [projects, restored]);
+
+  // Keep `selected` in sync with the refetched list, so edits made elsewhere
+  // (e.g. saving allowedTools in Settings) are reflected in the prop instead of
+  // reverting to a stale snapshot on remount.
+  useEffect(() => {
+    if (!selected || !projects) return;
+    const fresh = projects.find((p) => p.id === selected.id);
+    if (fresh && fresh !== selected) setSelected(fresh);
+  }, [projects, selected]);
 
   useEffect(() => {
     if (!projects?.length) return;
@@ -434,7 +445,7 @@ export function App() {
                 )}
                 {tab === "settings" && (
                   <div className="h-full overflow-auto">
-                    <SettingsTab key={selected.id} project={selected} />
+                    <SettingsTab key={selected.id} project={selected} onProjectUpdate={refetch} />
                   </div>
                 )}
                 {tab === "marketing" && (

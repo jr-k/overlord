@@ -14,6 +14,43 @@ import { useModels } from "../hooks/useModels.js";
 type AgentStatus = "idle" | "waiting" | "running";
 type LearningsStatus = "idle" | "generating";
 
+interface ToolRequest {
+  id: number;
+  tool: string;
+  reason: string | null;
+  status: string;
+  createdAt: string;
+}
+
+type SlashCmdType = "skill" | "command" | "agent" | "plugin" | "builtin" | "overlord";
+interface SlashCmd {
+  name: string;
+  description?: string | null;
+  type?: SlashCmdType;
+  scope?: "project" | "global" | "plugin" | "builtin" | "overlord";
+}
+
+// Overlord-native slash commands. The CLI doesn't expose interactive commands
+// in headless --print mode (and they'd do nothing there), so Overlord handles
+// these itself — intercepted in handleSend, never sent to claude.
+const OVERLORD_COMMANDS: SlashCmd[] = [
+  { name: "model", description: "Changer le modèle — /model opus, ou /model pour lister", scope: "overlord", type: "overlord" },
+  { name: "stop", description: "Stopper l'agent en cours", scope: "overlord", type: "overlord" },
+  { name: "cost", description: "Afficher tokens et coût de la session", scope: "overlord", type: "overlord" },
+  { name: "help", description: "Lister les commandes Overlord disponibles", scope: "overlord", type: "overlord" },
+];
+const OVERLORD_COMMAND_NAMES = new Set(OVERLORD_COMMANDS.map((c) => c.name));
+
+// Merge bare command names (from a run's system/init event) into the rich list,
+// without dropping the descriptions already loaded from /api/commands.
+function mergeSlashNames(prev: SlashCmd[], names: string[]): SlashCmd[] {
+  const have = new Set(prev.map((c) => c.name));
+  const added = names
+    .filter((n) => !have.has(n))
+    .map((n): SlashCmd => ({ name: n, type: n.includes(":") ? "plugin" : "builtin" }));
+  return added.length ? [...prev, ...added].sort((a, b) => a.name.localeCompare(b.name)) : prev;
+}
+
 interface OverlordDesktopBridge {
   isDesktop: boolean;
   notifyAgentDone: (payload: { projectName: string; body?: string }) => Promise<unknown>;
@@ -565,6 +602,12 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     return () => clearInterval(interval);
   }, [fetchCodegraphStatus, codegraphStatus.indexing]);
 
+  const handleIndexCodegraph = useCallback(async () => {
+    setCodegraphStatus((s) => ({ ...s, indexing: true }));
+    await fetch(`/api/codegraph/${project.id}/init`, { method: "POST" });
+    fetchCodegraphStatus();
+  }, [project.id, fetchCodegraphStatus]);
+
   // Fetch workspace packages for the workspace selector
   const [workspacePackages, setWorkspacePackages] = useState<{ name: string; path: string; category: string }[]>([]);
   useEffect(() => {
@@ -700,20 +743,66 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
   // Track event index to deduplicate events after subscribe
   const lastEventIndexRef = useRef(0);
 
-  // Slash commands
-  const BUILTIN_COMMANDS = [
-    "clear", "help", "cost", "compact", "context",
-    "init", "release-notes", "review", "security-review",
-  ];
-  const [slashCommands, setSlashCommands] = useState<string[]>(BUILTIN_COMMANDS);
+  // Slash commands — the authoritative list is discovered dynamically from the
+  // CLI (GET /api/commands), enriched with descriptions, and refreshed by the
+  // server whenever the Claude version changes. Live runs merge in any names
+  // from their system/init event so the list stays current within a session.
+  const [slashCommands, setSlashCommands] = useState<SlashCmd[]>([]);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
+
+  // Load the full command list as soon as the project opens, so the menu is
+  // complete before the first message (not just after a turn emits init).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/commands/${project.id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && Array.isArray(d?.commands)) setSlashCommands(d.commands);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  // Tool-access requests the agent filed (overlord_request_tool). Shown as a
+  // banner the user approves/denies — the agent can never grant itself a tool.
+  const [toolRequests, setToolRequests] = useState<ToolRequest[]>([]);
+  const refreshToolRequests = useCallback(() => {
+    fetch(`/api/tool-requests/${project.id}`)
+      .then((r) => r.json())
+      .then((d) => setToolRequests(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [project.id]);
+
+  useEffect(() => {
+    refreshToolRequests();
+  }, [refreshToolRequests]);
+
+  // The agent files requests mid-run; pick them up as soon as the turn ends.
+  useEffect(() => {
+    if (agentStatus === "idle") refreshToolRequests();
+  }, [agentStatus, refreshToolRequests]);
+
+  const resolveToolRequest = useCallback(
+    async (reqId: number, action: "approve" | "deny") => {
+      await fetch(`/api/tool-requests/${project.id}/${reqId}/${action}`, { method: "POST" }).catch(() => {});
+      setToolRequests((prev) => prev.filter((r) => r.id !== reqId));
+    },
+    [project.id]
+  );
 
   const showSlash = input.startsWith("/") && agentStatus === "idle" && !slashDismissed;
   const slashQuery = input.startsWith("/") ? input.slice(1).toLowerCase() : "";
   const filteredCommands = useMemo(() => {
     if (!showSlash) return [];
-    return slashCommands.filter((cmd) => cmd.toLowerCase().includes(slashQuery));
+    const match = (c: SlashCmd) => c.name.toLowerCase().includes(slashQuery);
+    // Overlord-native commands first, then the dynamic CLI/skill list (deduped).
+    return [
+      ...OVERLORD_COMMANDS.filter(match),
+      ...slashCommands.filter((c) => !OVERLORD_COMMAND_NAMES.has(c.name) && match(c)),
+    ];
   }, [showSlash, slashCommands, slashQuery]);
 
   useEffect(() => {
@@ -842,7 +931,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         let stats = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalCost: 0, turns: 0 };
         for (const ev of msg.events) {
           if (ev.type === "system" && ev.subtype === "init" && ev.slash_commands) {
-            setSlashCommands((prev) => [...new Set([...BUILTIN_COMMANDS, ...ev.slash_commands])]);
+            setSlashCommands((prev) => mergeSlashNames(prev, ev.slash_commands));
           }
           if (ev.type === "system" && ev.subtype === "init" && ev.model) {
             setResolvedModel(ev.model);
@@ -922,7 +1011,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         }
 
         if (ev.type === "system" && ev.subtype === "init" && ev.slash_commands) {
-          setSlashCommands((prev) => [...new Set([...BUILTIN_COMMANDS, ...ev.slash_commands])]);
+          setSlashCommands((prev) => mergeSlashNames(prev, ev.slash_commands));
         }
         if (ev.type === "system" && ev.subtype === "init" && ev.model) {
           setResolvedModel(ev.model);
@@ -1103,7 +1192,72 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
     };
   }, [project.id, project.path, channel]);
 
+  // Ephemeral info bubble for command output (not persisted — display only).
+  const pushInfo = useCallback((text: string) => {
+    setEntries((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: text }]);
+  }, []);
+
+  // Intercept Overlord-native slash commands and run them locally instead of
+  // sending them to the (headless) agent, where they'd do nothing. Returns true
+  // if the input was a handled command.
+  const handleOverlordCommand = useCallback(
+    (raw: string): boolean => {
+      const m = raw.trim().match(/^\/(\w[\w-]*)\s*([\s\S]*)$/);
+      if (!m) return false;
+      const cmd = m[1];
+      const arg = m[2].trim();
+      if (!OVERLORD_COMMAND_NAMES.has(cmd)) return false;
+
+      if (cmd === "stop") {
+        wsRef.current?.send(JSON.stringify({ type: "stop", projectId: project.id, channel }));
+      } else if (cmd === "cost") {
+        const t = tokenStats;
+        pushInfo(
+          `**Session — ${t.turns} tour(s)**\n` +
+            `- Entrée : ${t.inputTokens.toLocaleString()} tokens` +
+            (t.cacheReadTokens ? ` (dont ${t.cacheReadTokens.toLocaleString()} en cache)` : "") + `\n` +
+            `- Sortie : ${t.outputTokens.toLocaleString()} tokens\n` +
+            `- Coût : $${t.totalCost.toFixed(4)}`
+        );
+      } else if (cmd === "model") {
+        if (arg) {
+          const q = arg.toLowerCase();
+          const found = models.find(
+            (mm) => mm.id.toLowerCase() === q || mm.short?.toLowerCase() === q || mm.label.toLowerCase().includes(q)
+          );
+          if (found) {
+            handleModelChange(found.id);
+            pushInfo(`Modèle changé pour **${found.label}**.`);
+          } else {
+            pushInfo(`Modèle « ${arg} » introuvable. Disponibles : ${models.map((mm) => mm.short || mm.id).join(", ")}`);
+          }
+        } else {
+          const current = models.find((mm) => mm.id === model)?.label ?? model ?? "défaut CLI";
+          pushInfo(
+            `Modèle actuel : **${current}**\n` +
+              `Disponibles : ${models.map((mm) => mm.short || mm.id).join(", ")}\n` +
+              `Usage : \`/model <nom>\``
+          );
+        }
+      } else if (cmd === "help") {
+        pushInfo(
+          `**Commandes Overlord**\n` +
+            OVERLORD_COMMANDS.map((c) => `- \`/${c.name}\` — ${c.description}`).join("\n") +
+            `\n\nLes autres entrées \`/\` sont des skills/commands exécutées par l'agent.`
+        );
+      }
+
+      setSlashDismissed(true);
+      onInputChange("");
+      return true;
+    },
+    [project.id, channel, tokenStats, models, model, handleModelChange, pushInfo, onInputChange]
+  );
+
   const handleSend = useCallback(() => {
+    // Overlord-native command? Handle it locally and don't send to the agent.
+    if (handleOverlordCommand(input)) return;
+
     const currentBlocks = [...pastedBlocks];
     const currentFiles = [...fileBlocks];
     const typedText = input;
@@ -1193,7 +1347,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
         channel,
       })
     );
-  }, [input, pastedBlocks, fileBlocks, project, onInputChange, agentStatus, channel, activeWorkspaces, messageQueue]);
+  }, [input, pastedBlocks, fileBlocks, project, onInputChange, agentStatus, channel, activeWorkspaces, messageQueue, handleOverlordCommand]);
 
   const handleAnswerQuestions = useCallback((answer: string) => {
     if (!wsRef.current) return;
@@ -1281,7 +1435,7 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        selectSlashCommand(filteredCommands[slashIndex]);
+        selectSlashCommand(filteredCommands[slashIndex].name);
         return;
       }
       if (e.key === "Escape") {
@@ -1635,25 +1789,110 @@ export function ChatTab({ project, input, onInputChange, activeWorkspaces, onTog
           <div className="absolute bottom-full left-4 right-4 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg scrollbar-visible">
             {filteredCommands.map((cmd, i) => (
               <button
-                key={cmd}
+                key={cmd.name}
                 className={cn(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
+                  "flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors",
                   i === slashIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
                 )}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  selectSlashCommand(cmd);
+                  selectSlashCommand(cmd.name);
                 }}
                 onMouseEnter={() => setSlashIndex(i)}
               >
-                <span className="font-mono text-xs text-primary">/</span>
-                <span>{cmd}</span>
+                <span className="font-mono text-xs text-primary mt-0.5 shrink-0">/</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono truncate">{cmd.name}</span>
+                    {cmd.scope && cmd.scope !== "builtin" && (
+                      <span
+                        className={cn(
+                          "shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide",
+                          cmd.scope === "project" && "bg-emerald-400/15 text-emerald-400",
+                          cmd.scope === "global" && "bg-sky-400/15 text-sky-400",
+                          cmd.scope === "plugin" && "bg-purple-400/15 text-purple-400",
+                          cmd.scope === "overlord" && "bg-primary/20 text-primary"
+                        )}
+                      >
+                        {cmd.scope}
+                      </span>
+                    )}
+                  </span>
+                  {cmd.description && (
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                      {cmd.description}
+                    </span>
+                  )}
+                </span>
               </button>
             ))}
           </div>
         )}
 
-        {/* Queued messages: persisted, editable and deletable */}
+        {/* Tool-access requests from the agent — approve to add to allowedTools */}
+        {toolRequests.length > 0 && (
+          <div className="mb-2 flex flex-col gap-2">
+            {toolRequests.map((req) => (
+              <div
+                key={req.id}
+                className="flex items-start justify-between gap-3 rounded-md border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs"
+              >
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="text-amber-400 font-medium">
+                    L'agent demande l'accès à{" "}
+                    <code className="font-mono text-foreground">{req.tool}</code>
+                  </span>
+                  {req.reason && (
+                    <span className="text-muted-foreground text-[10px]">{req.reason}</span>
+                  )}
+                  <span className="text-muted-foreground/70 text-[10px]">
+                    Approuver l'ajoute à l'allowlist de ce projet.
+                  </span>
+                </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 border-amber-400/40 text-amber-400 hover:bg-amber-400/10"
+                    onClick={() => resolveToolRequest(req.id, "approve")}
+                  >
+                    Approuver
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-muted-foreground"
+                    onClick={() => resolveToolRequest(req.id, "deny")}
+                  >
+                    Refuser
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* CodeGraph index suggestion */}
+        {channel === "chat" && !codegraphStatus.indexed && !codegraphStatus.indexing && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-xs">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-emerald-400 font-medium">Activer CodeGraph</span>
+              <span className="text-muted-foreground text-[10px]">
+                Index sémantique du code, -94% de tool calls pour Claude
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs gap-1.5 shrink-0"
+              onClick={handleIndexCodegraph}
+            >
+              Indexer
+            </Button>
+          </div>
+        )}
+
+        {/* Queued messages — persisted, editable, deletable */}
         <QueuePanel
           queue={messageQueue}
           agentIdle={agentStatus === "idle"}

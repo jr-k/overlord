@@ -55,9 +55,10 @@ interface InsightsData {
   days: number;
   totals: {
     sessions: number; prompts: number; assistantMsgs: number; toolUses: number;
-    inputTokens: number; cacheTokens: number; outputTokens: number;
+    inputTokens: number; cacheTokens: number; cacheRead: number; cacheCreate: number; outputTokens: number;
     cost: number; activeMin: number;
   };
+  lifetime: boolean;
   streak: { current: number; longest: number };
   peakHour: number;
   peakDow: number;
@@ -151,14 +152,17 @@ function computeStreak(dayset: Set<string>): { current: number; longest: number 
 function compute(days: number, rootDir: string): InsightsData {
   const prettyName = makePretty(rootDir);
   const now = Date.now();
-  const cutoff = now - days * 24 * 3600 * 1000;
+  // days <= 0 means lifetime (no time cutoff).
+  const lifetime = days <= 0;
+  const cutoff = lifetime ? 0 : now - days * 24 * 3600 * 1000;
   const win7 = now - 7 * 24 * 3600 * 1000;
   const win14 = now - 14 * 24 * 3600 * 1000;
 
   const data: InsightsData = {
     generatedAt: new Date(now).toISOString(),
     days,
-    totals: { sessions: 0, prompts: 0, assistantMsgs: 0, toolUses: 0, inputTokens: 0, cacheTokens: 0, outputTokens: 0, cost: 0, activeMin: 0 },
+    totals: { sessions: 0, prompts: 0, assistantMsgs: 0, toolUses: 0, inputTokens: 0, cacheTokens: 0, cacheRead: 0, cacheCreate: 0, outputTokens: 0, cost: 0, activeMin: 0 },
+    lifetime,
     streak: { current: 0, longest: 0 },
     peakHour: 0,
     peakDow: 0,
@@ -280,6 +284,8 @@ function compute(days: number, rootDir: string): InsightsData {
       data.totals.toolUses += p.toolUses;
       data.totals.inputTokens += p.inputTokens;
       data.totals.cacheTokens += p.cacheRead + p.cacheCreate;
+      data.totals.cacheRead += p.cacheRead;
+      data.totals.cacheCreate += p.cacheCreate;
       data.totals.outputTokens += p.outputTokens;
       data.totals.cost += p.cost;
       data.totals.activeMin += p.activeMin;
@@ -294,6 +300,17 @@ function compute(days: number, rootDir: string): InsightsData {
     const count = v.prompts + v.toolUses;
     if (!data.busiestDay || count > data.busiestDay.count) data.busiestDay = { date, count };
   }
+  // For lifetime, report the real span (first activity → today) so the calendar
+  // and "active days" ratio cover the whole history rather than a fixed window.
+  if (lifetime) {
+    const sorted = [...allActiveDays].sort();
+    if (sorted.length) {
+      const firstMs = new Date(sorted[0] + "T00:00:00Z").getTime();
+      data.days = Math.max(1, Math.round((now - firstMs) / 86400000) + 1);
+    } else {
+      data.days = 0;
+    }
+  }
   return data;
 }
 
@@ -303,7 +320,9 @@ const TTL = 2 * 60 * 1000;
 
 // GET /api/insights?days=30
 app.get("/", (c) => {
-  const days = Math.min(365, Math.max(1, Number(c.req.query("days")) || 30));
+  const raw = c.req.query("days");
+  // "all" or "0" => lifetime (no cap); otherwise clamp to [1, 365].
+  const days = raw === "all" || raw === "0" ? 0 : Math.min(365, Math.max(1, Number(raw) || 30));
   const force = c.req.query("refresh") === "1";
   const hit = cache.get(days);
   if (hit && !force && Date.now() - hit.ts < TTL) return c.json(hit.data);

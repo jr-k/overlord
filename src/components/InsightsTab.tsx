@@ -11,8 +11,8 @@ interface ProjectStat {
   days: number; recent: number; prev: number; tools: Record<string, number>;
 }
 interface InsightsData {
-  generatedAt: string; days: number;
-  totals: { sessions: number; prompts: number; assistantMsgs: number; toolUses: number; inputTokens: number; cacheTokens: number; outputTokens: number; cost: number; activeMin: number };
+  generatedAt: string; days: number; lifetime?: boolean;
+  totals: { sessions: number; prompts: number; assistantMsgs: number; toolUses: number; inputTokens: number; cacheTokens: number; cacheRead: number; cacheCreate: number; outputTokens: number; cost: number; activeMin: number };
   streak: { current: number; longest: number };
   peakHour: number; peakDow: number;
   busiestDay: { date: string; count: number } | null;
@@ -160,6 +160,19 @@ export function InsightsTab() {
   const achv = achievements(data);
   const medals = ["🥇", "🥈", "🥉"];
 
+  // Token usage breakdown
+  const t = data.totals;
+  const totalTokens = t.inputTokens + t.outputTokens + t.cacheRead + t.cacheCreate;
+  const cacheBase = t.cacheRead + t.cacheCreate + t.inputTokens;
+  const cacheEff = cacheBase > 0 ? t.cacheRead / cacheBase : 0;
+  const tokensPerPrompt = t.prompts > 0 ? totalTokens / t.prompts : 0;
+  const tokenSegments = [
+    { label: "Input", value: t.inputTokens, color: "bg-sky-500" },
+    { label: "Cache créé", value: t.cacheCreate, color: "bg-amber-500" },
+    { label: "Cache lu", value: t.cacheRead, color: "bg-emerald-500" },
+    { label: "Output", value: t.outputTokens, color: "bg-violet-500" },
+  ];
+
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-9">
       {/* Header */}
@@ -171,8 +184,8 @@ export function InsightsTab() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {[7, 30, 90].map((dd) => (
-            <Button key={dd} size="sm" variant={days === dd ? "default" : "outline"} onClick={() => setDays(dd)}>{dd}d</Button>
+          {[{ v: 7, l: "7j" }, { v: 30, l: "30j" }, { v: 90, l: "90j" }, { v: 0, l: "Tout" }].map(({ v, l }) => (
+            <Button key={v} size="sm" variant={days === v ? "default" : "outline"} onClick={() => setDays(v)}>{l}</Button>
           ))}
           <Button size="sm" variant="ghost" onClick={() => fetch(`/api/insights?days=${days}&refresh=1`).then(refetch)} title="Refresh">
             <RefreshCw className="h-4 w-4" />
@@ -212,6 +225,52 @@ export function InsightsTab() {
         <Kpi value={fmt(data.totals.outputTokens)} label="Generated tokens" />
         <Kpi value={`${dayKeys.length}/${data.days}`} label="Active days" />
       </div>
+
+      {/* Tokens */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+            Tokens {data.lifetime ? "· lifetime" : `· ${data.days}j`}
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            Total <b className="text-foreground">{fmt(totalTokens)}</b>
+          </span>
+        </div>
+        <Card className="p-5 space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Kpi value={fmt(totalTokens)} label="Total tokens" />
+            <Kpi value={fmt(t.inputTokens)} label="Input" />
+            <Kpi value={fmt(t.outputTokens)} label="Output" />
+            <Kpi value={fmt(t.cacheRead)} label="Cache lu" />
+            <Kpi value={fmt(t.cacheCreate)} label="Cache créé" />
+            <Kpi value={`${Math.round(cacheEff * 100)}%`} label="Taux de cache" />
+          </div>
+          {/* Proportion bar */}
+          <div>
+            <div className="flex h-3 w-full overflow-hidden rounded-full">
+              {tokenSegments.map((s) => (
+                <div
+                  key={s.label}
+                  className={s.color}
+                  style={{ width: `${totalTokens > 0 ? (s.value / totalTokens) * 100 : 0}%` }}
+                  title={`${s.label} · ${fmt(s.value)} (${totalTokens > 0 ? Math.round((s.value / totalTokens) * 100) : 0}%)`}
+                />
+              ))}
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+              {tokenSegments.map((s) => (
+                <span key={s.label} className="inline-flex items-center gap-1.5">
+                  <span className={`h-2.5 w-2.5 rounded-sm ${s.color}`} />
+                  {s.label} · <b className="text-foreground">{fmt(s.value)}</b>
+                </span>
+              ))}
+              <span className="inline-flex items-center gap-1.5 ml-auto">
+                ~<b className="text-foreground">{fmt(Math.round(tokensPerPrompt))}</b> tokens / prompt
+              </span>
+            </div>
+          </div>
+        </Card>
+      </section>
 
       {/* Calendar */}
       <section>
